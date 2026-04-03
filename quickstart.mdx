@@ -1,80 +1,193 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start"
+description: "Install the Puppet Firewall module and configure a safe, working set of firewall rules."
+keywords: ['puppet', 'firewall', 'iptables', 'install', 'quickstart', 'pre', 'post']
 ---
 
-## Get started in three steps
+This guide walks you through installing the module and setting up a baseline firewall configuration that keeps your SSH and Puppet server connections alive during every Puppet run.
 
-Get your documentation site running locally and make your first customization.
+<Info>
+  If you already have firewall rules in place, be aware that the module applies rules in the order they appear in the catalog. A deny rule could be applied before your allow rules, potentially cutting off connections to your Puppet server. Follow the steps below to set up `pre` and `post` classes that enforce safe rule ordering.
+</Info>
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Install the module">
+    Run the following command on your Puppet server to install the module from the Puppet Forge:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    puppet module install puppetlabs-firewall
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Create the my_fw::pre class">
+    The `pre` class defines rules that run **before** any other firewall rules. These rules ensure you retain basic connectivity — ICMP, loopback, and established connections — so that Puppet can continue to manage your nodes.
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    Create the file `my_fw/manifests/pre.pp` with the following content:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```puppet
+    class my_fw::pre {
+      Firewall {
+        require => undef,
+      }
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+      # Default firewall rules
+      firewall { '000 accept all icmp':
+        proto => 'icmp',
+        jump  => 'accept',
+      }
+      -> firewall { '001 accept all to lo interface':
+        proto   => 'all',
+        iniface => 'lo',
+        jump    => 'accept',
+      }
+      -> firewall { '002 reject local traffic not on loopback interface':
+        iniface     => '! lo',
+        proto       => 'all',
+        destination => '127.0.0.1/8',
+        jump        => 'reject',
+      }
+      -> firewall { '003 accept related established rules':
+        proto  => 'all',
+        state  => ['RELATED', 'ESTABLISHED'],
+        jump   => 'accept',
+      }
+    }
+    ```
 
-### Step 3: Go live
+    The `require => undef` inside the `Firewall` block overrides the default ordering so these pre-rules are not accidentally constrained by later defaults. The chaining arrows (`->`) ensure the rules are applied in sequence.
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Create the my_fw::post class">
+    The `post` class defines rules that run **after** all other firewall rules. The drop-all rule here acts as a catch-all for any traffic that wasn't explicitly accepted by earlier rules.
 
-## Next steps
+    Create the file `my_fw/manifests/post.pp` with the following content:
 
-Now that you have your docs running, explore these key features:
+    ```puppet
+    class my_fw::post {
+      firewall { '999 drop all':
+        proto  => 'all',
+        jump   => 'drop',
+        before => undef,
+      }
+    }
+    ```
 
-<CardGroup cols={2}>
+    The `before => undef` ensures this rule is not constrained to run before anything else, so it stays at the end.
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    <Tip>
+      As an alternative to a drop-all rule, you can use `firewallchain` to set a default policy on the INPUT chain:
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+      ```puppet
+      firewallchain { 'INPUT:filter:IPv4':
+        ensure => present,
+        policy => drop,
+        before => undef,
+      }
+      ```
+    </Tip>
+  </Step>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+  <Step title="Set up default Firewall resource ordering">
+    In your `site.pp` or a top-scope manifest, declare the default `before` and `require` parameters for all `Firewall` resources. This ensures `my_fw::pre` always runs first and `my_fw::post` always runs last — for every rule you define anywhere in your manifests.
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+    ```puppet
+    Firewall {
+      before  => Class['my_fw::post'],
+      require => Class['my_fw::pre'],
+    }
+    ```
+  </Step>
 
-</CardGroup>
+  <Step title="Declare the pre and post classes">
+    Declare both classes to satisfy their dependencies. You can do this using an external node classifier or inline in your manifest:
+
+    ```puppet
+    class { ['my_fw::pre', 'my_fw::post']: }
+    ```
+  </Step>
+
+  <Step title="Include the firewall class">
+    Include the `firewall` class to ensure the correct iptables packages are installed and services are running:
+
+    ```puppet
+    class { 'firewall': }
+    ```
+  </Step>
+</Steps>
+
+## Complete working example
+
+The following shows how a complete top-scope manifest might look after following the steps above:
+
+```puppet
+# site.pp
+
+# Set default ordering for all Firewall resources
+Firewall {
+  before  => Class['my_fw::post'],
+  require => Class['my_fw::pre'],
+}
+
+# Declare pre and post classes
+class { ['my_fw::pre', 'my_fw::post']: }
+
+# Ensure iptables packages and services are managed
+class { 'firewall': }
+```
+
+With this configuration in place, any `firewall` resource you declare in a profile or role will automatically be ordered between the `pre` and `post` rules.
+
+## Adding application-specific rules
+
+Once the baseline is in place, you can add rules close to the services they protect. For example, in an Apache profile:
+
+```puppet
+class profile::apache {
+  include apache
+  apache::vhost { 'mysite':
+    ensure => present,
+  }
+
+  firewall { '100 allow http and https access':
+    dport  => [80, 443],
+    proto  => 'tcp',
+    jump   => 'accept',
+  }
+}
+```
+
+## Purging unmanaged rules
+
+If you want Puppet to remove any firewall rules not defined in your manifests, add the following to your top-scope file:
+
+```puppet
+resources { 'firewall':
+  purge => true,
+}
+```
+
+To also purge unmanaged chains:
+
+```puppet
+resources { 'firewallchain':
+  purge => true,
+}
+```
+
+<Warning>
+  Purging removes **all** rules not managed by Puppet, including rules added manually or by other tools. Internal chains cannot be deleted, but they will be flushed and have their policy reverted to the default. To suppress the resulting warnings, declare a `firewallchain` resource for each built-in chain you want to retain:
+
+  ```puppet
+  firewallchain { 'POSTROUTING:mangle:IPv6':
+    ensure => present,
+  }
+
+  resources { 'firewallchain':
+    purge => true,
+  }
+  ```
+</Warning>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Rules are persisted automatically between reboots. There are known issues with ip6tables on older Debian/Ubuntu distributions and with ebtables.
 </Note>

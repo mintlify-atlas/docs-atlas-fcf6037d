@@ -1,0 +1,122 @@
+---
+title: "IPv6 Rules"
+description: "Write ip6tables rules using the protocol parameter, understand differences from IPv4 rule handling, and learn about known issues on older distributions."
+keywords: ["firewall", "IPv6", "ip6tables", "iptables", "protocol"]
+---
+
+The Puppet Firewall module supports both `iptables` (IPv4) and `ip6tables` (IPv6). By default, every `firewall` resource creates an IPv4 rule. To create an IPv6 rule, set the `protocol` parameter.
+
+## Writing IPv6 rules
+
+Use `protocol => 'IPv6'` (or the equivalent `protocol => 'ip6tables'`) to target `ip6tables` instead of `iptables`:
+
+<Tabs>
+  <Tab title="IPv4">
+    ```puppet
+    firewall { '006 Allow inbound SSH':
+      dport  => 22,
+      proto  => 'tcp',
+      jump   => 'accept',
+    }
+    ```
+  </Tab>
+  <Tab title="IPv6">
+    ```puppet
+    firewall { '006 Allow inbound SSH (v6)':
+      dport    => 22,
+      proto    => 'tcp',
+      jump     => 'accept',
+      protocol => 'ip6tables',
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+As of v7.0.0, the `protocol` attribute accepts `IPv4`, `IPv6`, `iptables`, or `ip6tables`. The older `provider` attribute has been renamed to `protocol`. Both the new symbolic values (`IPv4`/`IPv6`) and the legacy tool names (`iptables`/`ip6tables`) are accepted.
+</Note>
+
+## v7.0.0 migration example
+
+Before v7.0.0, IPv6 rules used the `provider` attribute with the value `ip6tables`. The equivalent after the migration is:
+
+<CodeGroup>
+
+```puppet before v7.0.0
+firewall { '571 - hop_limit':
+  ensure    => present,
+  proto     => 'tcp',
+  dport     => '571',
+  action    => 'ACCEPT',
+  hop_limit => '5',
+  provider  => 'ip6tables',
+}
+```
+
+```puppet v7.0.0 and later
+firewall { '571 - hop_limit':
+  ensure    => present,
+  proto     => 'tcp',
+  dport     => '571',
+  jump      => 'accept',
+  hop_limit => '5',
+  protocol  => 'IPv6',
+}
+```
+
+</CodeGroup>
+
+## IPv6-specific parameters
+
+Some parameters only apply to IPv6 rules:
+
+| Parameter | Description |
+|-----------|-------------|
+| `hop_limit` | Match on the IPv6 hop limit value. Can be negated with `! `. |
+| `isfirstfrag` | Matches if the packet is the first fragment of a fragmented IPv6 packet. |
+| `ishasmorefrags` | Matches if the packet has its "more fragments" bit set. |
+| `islastfrag` | Matches if the packet is the last fragment of an IPv6 packet. |
+
+These parameters require a rule with `protocol => 'IPv6'` or `protocol => 'ip6tables'`. Using them with an IPv4 rule will cause the catalog to fail.
+
+## IPv4-only parameters
+
+Conversely, some parameters are IPv4-specific and cannot be used with IPv6 rules:
+
+| Parameter | Description |
+|-----------|-------------|
+| `clusterip_clustermac` | ClusterIP MAC address (IPv4 only) |
+| `clusterip_hash_init` | ClusterIP hash seed (IPv4 only) |
+| `clusterip_hashmode` | ClusterIP hashing mode (IPv4 only) |
+| `clusterip_local_node` | ClusterIP local node index (IPv4 only) |
+| `clusterip_new` | Create a new ClusterIP entry (IPv4 only) |
+| `clusterip_total_nodes` | Total nodes in ClusterIP cluster (IPv4 only) |
+
+## The `ip6tables_version` fact
+
+The module provides a Facter fact you can use to inspect the ip6tables version on a node:
+
+```puppet
+# In a manifest or ERB template:
+$ip6tables_version = $facts['ip6tables_version']
+```
+
+Use this fact to conditionally apply rules or work around version-specific bugs. The companion facts `iptables_version` and `iptables_persistent_version` (Debian/Ubuntu only) are also available.
+
+## Known issues with ip6tables
+
+### Older Debian and Ubuntu distributions
+
+Rules are persisted automatically between reboots. However, there are **known issues with ip6tables persistence on older Debian and Ubuntu distributions**. On these systems, ip6tables rules may not survive a reboot correctly.
+
+<Warning>
+If you are running an older Debian or Ubuntu release, verify that your ip6tables rules are actually restored after a reboot. You may need to configure an alternative persistence mechanism for IPv6.
+</Warning>
+
+### ebtables
+
+There are also known issues with ebtables (bridge firewalling). At present, only iptables and ip6tables chains are fully supported by the `firewallchain` resource.
+
+### SLES `socket` and `owner` parameters
+
+The `socket` parameter is not supported on SLES. On Oracle Enterprise Linux with the "Unbreakable" kernel, both `socket` and `owner` are unsupported. Declaring these on an unsupported system causes iptables rules to fail to apply. These limitations apply to both IPv4 and IPv6 rules.

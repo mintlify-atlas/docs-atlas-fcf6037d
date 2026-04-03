@@ -1,28 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Puppet Firewall Module",
+  "projectType": "infrastructure",
+  "projectName": "Puppet Firewall Module",
+  "projectDescription": "A Puppet module for managing iptables and ip6tables firewall rules declaratively across Linux systems.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#1c1c1c",
-    "light": "#fcae1c",
-    "dark": "#fcc75c"
-  },
-  "favicon": "https://media.brand.dev/b08dd7f9-8736-48ba-ad41-ef7d5bba629b.png",
-  "logo": {
-    "light": "https://media.brand.dev/8cb1e255-742a-4f63-9bda-d495d958b288.svg",
-    "dark": "https://media.brand.dev/8cb1e255-742a-4f63-9bda-d495d958b288.svg"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/puppetlabs/puppetlabs-firewall"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/puppetlabs/puppetlabs-firewall"
-    }
-  },
+  "primaryColor": "#1c1c1c",
+  "lightColor": "#fcae1c",
+  "darkColor": "#fcc75c",
   "navigation": {
     "tabs": [
       {
@@ -76,5 +59,25 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Declarative iptables and ip6tables rule management via Puppet DSL",
+    "firewallchain resource for managing custom and built-in chains",
+    "Support for NAT (SNAT/DNAT/MASQUERADE), mangle, filter, and raw tables",
+    "Rule ordering via numeric prefixes in resource titles",
+    "Rule inversion with '!' prefix for parameters",
+    "Automatic rule persistence across reboots",
+    "Purging of unmanaged firewall rules and chains",
+    "ebtables support for bridge firewalling",
+    "IPv4 and IPv6 protocol support",
+    "Custom Facter facts for iptables version detection"
+  ],
+  "publicApiSurface": [
+    "firewall { 'NNN title': ... } resource type",
+    "firewallchain { 'CHAIN:table:protocol': ... } resource type",
+    "class firewall (ensure, ensure_v6, pkg_ensure, service_name, package_name, ebtables_manage)",
+    "Fact: iptables_version",
+    "Fact: ip6tables_version",
+    "Fact: iptables_persistent_version"
+  ]
 }

@@ -1,0 +1,192 @@
+---
+title: 'Troubleshooting'
+description: 'Solutions to common problems encountered when using the Puppet Firewall module.'
+keywords: ['firewall', 'troubleshooting', 'iptables', 'ip6tables', 'MCollective', 'duplicate rule', 'locked out', 'purge']
+---
+
+<AccordionGroup>
+
+  <Accordion title="MCollective causes reversed firewall rule order in Puppet Enterprise">
+
+    If you use MCollective to kick off Puppet runs in Puppet Enterprise 2016.1, 2015.3, 2015.2, or 3.8.x, your firewall rules may appear in reverse order after the run.
+
+    In many firewall configurations, the last rule drops all packets. If the rule order is reversed, this drop rule is applied first, which causes all network connectivity to fail immediately.
+
+    **Solution:** Do not use MCollective to kick off Puppet runs when using the firewall module. Use one of the following alternatives instead:
+
+    - Run `puppet agent -t` directly on the command line.
+    - Schedule Puppet runs using a cron job.
+    - Click **Run Puppet** on an individual node from the Puppet Enterprise console.
+
+  </Accordion>
+
+  <Accordion title="Locked out of a node after a Puppet run">
+
+    The firewall module applies rules immediately as the catalog executes. If you do not define `pre` and `post` rule classes, a deny-all rule can be applied before the rules that allow your SSH or Puppet server connections, locking you out.
+
+    <Warning>
+      Always test changes to firewall rules with `puppet agent --noop` before applying them to a live system.
+    </Warning>
+
+    **Solution:** Always define `my_fw::pre` and `my_fw::post` classes and set them as ordering boundaries for all other firewall rules. The `pre` class should establish basic connectivity (ICMP, loopback, established/related connections), and the `post` class should contain the final drop-all rule.
+
+    ```puppet
+    Firewall {
+      before  => Class['my_fw::post'],
+      require => Class['my_fw::pre'],
+    }
+    ```
+
+    This ensures that your critical connectivity rules are always applied before any custom rules, and that the final drop rule is always last. Run `puppet agent --noop` first to preview the rule set that will be applied before committing to a live run.
+
+  </Accordion>
+
+  <Accordion title="Duplicate rule error">
+
+    The module throws an error and halts when it finds an unmanaged rule on the target system whose comment matches the title of a rule defined in your Puppet manifest.
+
+    The error message will indicate that a duplicate rule has been detected.
+
+    **What it means:** iptables stores the Puppet rule title in the rule's comment field. If a rule was created outside of Puppet (or is a leftover from a previous configuration) with the same comment, the module cannot determine which rule is authoritative.
+
+    **How to resolve:**
+
+    1. Identify the duplicate rule on the system by running:
+
+       ```bash
+       iptables-save | grep "your rule comment"
+       ```
+
+    2. Either remove the duplicate unmanaged rule from the system manually, or update the title in your Puppet manifest so it is unique.
+
+    <Note>
+      The `onduplicaterulebehaviour` parameter has been removed from the module. A duplicate rule always produces an error now. There is no longer a configurable alternative behavior.
+    </Note>
+
+  </Accordion>
+
+  <Accordion title="Unmanaged rules causing conflicts">
+
+    If rules not managed by Puppet are present on the system and interfere with your managed rules, you have several options for controlling which unmanaged rules are removed or ignored.
+
+    **Option 1: Purge all unmanaged firewall rules globally**
+
+    ```puppet
+    resources { 'firewall':
+      purge => true,
+    }
+    ```
+
+    This removes every firewall rule not defined in Puppet. Use with caution.
+
+    **Option 2: Use `ignore_foreign` on a chain**
+
+    Setting `ignore_foreign => true` on a `firewallchain` resource tells the module to skip rules whose titles do not match the Puppet title pattern (`^\d+[[:graph:][:space:]]`) when purging unmanaged rules from that chain.
+
+    ```puppet
+    firewallchain { 'INPUT:filter:IPv4':
+      purge          => true,
+      ignore_foreign => true,
+    }
+    ```
+
+    <Note>
+      `ignore_foreign` does not work as expected when combined with a global `resources { 'firewall': purge => true }` declaration.
+    </Note>
+
+    **Option 3: Use `ignore` regex to exempt specific rules**
+
+    The `ignore` parameter on `firewallchain` accepts a regex (or array of regexes) matched against the output of `iptables-save`. Rules matching the regex are exempted from purging.
+
+    ```puppet
+    firewallchain { 'INPUT:filter:IPv4':
+      purge  => true,
+      ignore => [
+        '-j fail2ban-ssh',
+        '--comment "[^"]*(?i:ignore)[^"]*"',
+      ],
+    }
+    ```
+
+  </Accordion>
+
+  <Accordion title="iptables rules not persisting after reboot">
+
+    The firewall module applies rules to the running firewall immediately. Whether those rules persist across reboots depends on your distribution and how persistence is configured.
+
+    **Debian and Ubuntu:**
+
+    Install the `iptables-persistent` package to save and restore rules on boot:
+
+    ```bash
+    apt-get install iptables-persistent
+    ```
+
+    You can manage this with Puppet:
+
+    ```puppet
+    package { 'iptables-persistent':
+      ensure => present,
+    }
+    ```
+
+    The `iptables_persistent_version` fact reports the installed version of this package on Debian and Ubuntu systems.
+
+    **RedHat, CentOS, Rocky, AlmaLinux:**
+
+    Enable and start the `iptables` service to persist rules:
+
+    ```bash
+    systemctl enable iptables
+    systemctl start iptables
+    ```
+
+    **Known issues:** There are known persistence issues with ip6tables on older Debian and Ubuntu distributions. Verify that ip6tables rules survive reboots in your environment. There are also known issues with ebtables persistence.
+
+  </Accordion>
+
+  <Accordion title="Catalog fails on SLES with socket parameter">
+
+    If your catalog fails with iptables errors on a SLES node, check whether any of your firewall rules use the `socket` parameter.
+
+    The `socket` parameter is not supported on SLES. Unlike other unsupported features that emit a warning, using `socket` on SLES causes the catalog to fail outright.
+
+    **Solution:** Remove the `socket` parameter from any firewall rules that target SLES nodes. If you need to apply the same manifest to both SLES and non-SLES systems, use a conditional:
+
+    ```puppet
+    firewall { '100 example rule':
+      proto  => 'tcp',
+      dport  => 443,
+      jump   => 'accept',
+      socket => $facts['os']['name'] ? {
+        'SLES'  => undef,
+        default => true,
+      },
+    }
+    ```
+
+  </Accordion>
+
+</AccordionGroup>
+
+## Getting inline help
+
+You can access documentation for the `firewall` type directly from the command line:
+
+```bash
+puppet describe firewall
+```
+
+Or retrieve the full type reference:
+
+```bash
+puppet doc -r type
+```
+
+Then search the output for `firewall`.
+
+## Reporting bugs
+
+If you encounter a bug or want to request a feature, file a ticket in the Puppetlabs GitHub issue tracker:
+
+[https://github.com/puppetlabs/puppetlabs-firewall/issues](https://github.com/puppetlabs/puppetlabs-firewall/issues)

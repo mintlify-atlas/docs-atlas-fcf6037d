@@ -1,0 +1,120 @@
+---
+title: "Purging Unmanaged Rules"
+description: "Remove firewall rules and chains not defined in Puppet using the resources metatype, and use ignore and ignore_foreign to exempt specific rules from purging."
+keywords: ["firewall", "purge", "unmanaged rules", "firewallchain", "ignore", "ignore_foreign", "fail2ban"]
+---
+
+By default, the Puppet Firewall module only manages rules you explicitly declare. Any rules already on the system that are not in your Puppet manifests remain untouched. If you want Puppet to be the single source of truth — removing any rule it did not create — you need to enable purging.
+
+<Warning>
+Enabling purging will remove any firewall rule or chain not defined in Puppet. This includes rules added manually, by other tools such as fail2ban, or by other automation. Test purging in a non-production environment first, and use the `ignore` or `ignore_foreign` parameters to exempt rules you do not want removed.
+</Warning>
+
+## Purging unmanaged firewall rules
+
+Add the following `resources` metatype declaration to your `site.pp` or a base profile that is applied to every managed node:
+
+```puppet
+resources { 'firewall':
+  purge => true,
+}
+```
+
+This clears any existing iptables rules and ensures that only rules defined in Puppet remain on the machine.
+
+## Purging unmanaged firewall chains
+
+To also remove user-defined chains that are not declared in Puppet, add:
+
+```puppet
+resources { 'firewallchain':
+  purge => true,
+}
+```
+
+<Info>
+Internal (built-in) chains such as `INPUT`, `FORWARD`, `OUTPUT`, `PREROUTING`, and `POSTROUTING` cannot be deleted. When the module encounters them during a purge, it flushes their rules and reverts the policy to the default instead of removing the chain itself.
+</Info>
+
+## Handling built-in chains during purging
+
+When `resources { 'firewallchain': purge => true }` is active, you will see warning messages for every built-in chain the module encounters that is not explicitly declared in your manifests:
+
+```
+Warning: Inbuilt Chains may not be deleted. Chain `POSTROUTING:mangle:IPv6` will be flushed and have it's policy reverted to default.
+```
+
+To suppress these warnings, declare a `firewallchain` resource for every built-in chain you want to preserve:
+
+```puppet
+firewallchain { 'POSTROUTING:mangle:IPv6':
+  ensure  => present,
+}
+
+resources { 'firewallchain':
+  purge => true,
+}
+```
+
+Repeat this for every built-in chain in every table and protocol combination used on your nodes.
+
+## Fine-grained control with `purge` and `ignore_foreign`
+
+The `firewallchain` resource provides two properties for more targeted purge behavior:
+
+### `purge`
+
+Setting `purge => true` on an individual `firewallchain` resource removes unmanaged rules from that specific chain only, without requiring a global `resources { 'firewallchain': purge => true }` declaration:
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  ensure => present,
+  purge  => true,
+}
+```
+
+### `ignore_foreign`
+
+Setting `ignore_foreign => true` causes the module to skip rules whose comments do not match the Puppet title pattern `^\d+[[:graph:][:space:]]`. This lets you ignore rules not created by Puppet without having to enumerate them individually:
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  ensure         => present,
+  purge          => true,
+  ignore_foreign => true,
+}
+```
+
+<Warning>
+`ignore_foreign` on a `firewallchain` resource does not work as expected when combined with a global `resources { 'firewall': purge => true }` declaration. Use one approach or the other, not both simultaneously.
+</Warning>
+
+## Exempting specific rules with `ignore`
+
+The `ignore` property on `firewallchain` accepts a regex (or array of regexes) matched against the output of `iptables-save`. Any rule whose serialized form matches one of the patterns is exempt from purging.
+
+This is particularly useful for tools like fail2ban that add their own rules dynamically:
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  purge => true,
+  ignore => [
+    '-j fail2ban-ssh', # ignore the fail2ban jump rule
+    '--comment "[^"]*(?i:ignore)[^"]*"', # ignore any rules with "ignore" (case insensitive) in the comment
+  ],
+}
+```
+
+<Tip>
+To use case-insensitive matching in an `ignore` regex, use the Ruby inline flag syntax: `'(?i)pattern'` or `'(?i:pattern)'`. Standard `/foo/i` regex literals are not supported in the string value.
+</Tip>
+
+## Summary of purge options
+
+| Mechanism | Scope | Use when |
+|-----------|-------|----------|
+| `resources { 'firewall': purge => true }` | All firewall rules globally | You want Puppet to own all iptables rules on the node |
+| `resources { 'firewallchain': purge => true }` | All firewall chains globally | You want Puppet to own all chains, including removal of user-defined ones |
+| `firewallchain { '...': purge => true }` | Single chain | You want targeted purging of one specific chain |
+| `firewallchain { '...': ignore_foreign => true }` | Single chain | You want to skip rules not created by Puppet in one chain |
+| `firewallchain { '...': ignore => [...] }` | Single chain | You want to exempt specific rules by regex from purging |

@@ -1,0 +1,232 @@
+---
+title: "firewall Class"
+description: "Reference for the firewall Puppet class — installs packages, manages services, and sets up iptables persistence."
+---
+
+## Overview
+
+The `firewall` class performs the foundational setup required before you can use the `firewall` and `firewallchain` resource types. It handles:
+
+- Installing the platform-appropriate iptables package(s)
+- Enabling and managing the iptables service(s)
+- Setting up firewall rule persistence so rules survive reboots
+
+On Linux, the class delegates to `firewall::linux`, which in turn includes the correct platform-specific subclass (`firewall::linux::debian`, `firewall::linux::redhat`, `firewall::linux::archlinux`, or `firewall::linux::gentoo`) based on the node's OS family.
+
+<Note>
+The `firewall` class supports Linux kernels only. FreeBSD, OpenBSD, and Windows nodes are silently skipped. Any other kernel causes a catalog failure.
+</Note>
+
+## Usage
+
+Declare the class on every node that needs firewall management:
+
+```puppet
+class { 'firewall': }
+```
+
+Or use `include` when you don't need to pass parameters:
+
+```puppet
+include firewall
+```
+
+Once the class is declared, you can define `firewall` resources on the same node and they will autorequire the packages and services this class manages.
+
+## Parameters
+
+<ParamField path="ensure" type="Enum[running, stopped]" default="running">
+  Controls the state of the IPv4 iptables service. Set to `running` to keep the
+  service active or `stopped` to disable it. This value is also used as the
+  fallback for `ensure_v6` when `ensure_v6` is not explicitly set.
+</ParamField>
+
+<ParamField path="ensure_v6" type="Optional[Enum[running, stopped]]" default="undef">
+  Controls the state of the IPv6 iptables service. Accepts `running` or
+  `stopped`. When left as `undef` (the default), the value of `ensure` is used
+  instead, so both IPv4 and IPv6 services share the same state unless you
+  override this.
+</ParamField>
+
+<ParamField path="pkg_ensure" type="Enum[present, installed, latest]" default="present">
+  Controls the ensure state of the iptables package resource. Use `present` or
+  `installed` to install the package without enforcing a specific version, or
+  `latest` to always upgrade to the newest available version. When
+  `ebtables_manage` is `true`, this value also applies to the ebtables package.
+</ParamField>
+
+<ParamField path="service_name" type="Variant[String[1], Array[String[1]]]">
+  The name (or names) of the IPv4 iptables service to manage. Defaults to the
+  platform-specific value from `firewall::params`. You only need to set this if
+  your system uses a non-standard service name. Accepts a single string or an
+  array of strings for platforms that require multiple services (for example,
+  RedHat 8+ uses both `iptables` and `nftables`).
+</ParamField>
+
+<ParamField path="service_name_v6" type="Optional[String[1]]">
+  The name of the IPv6 iptables service to manage. Defaults to the
+  platform-specific value from `firewall::params`. On Debian and Ubuntu systems
+  this is `undef` because persistence is handled by a single
+  `netfilter-persistent` service for both IPv4 and IPv6. On Gentoo and Arch
+  Linux it is also `undef` because those platforms bundle both protocols into
+  the same service list.
+</ParamField>
+
+<ParamField path="package_name" type="Optional[Variant[String[1], Array[String[1]]]">
+  The package or packages to install. Defaults to the platform-specific value
+  from `firewall::params`. Set to `undef` to skip package management entirely
+  (useful when packages are managed outside Puppet). Accepts a single string or
+  an array of strings for platforms that require multiple packages (for example,
+  RedHat 8+ installs both `iptables-services` and `nftables`).
+</ParamField>
+
+<ParamField path="ebtables_manage" type="Boolean" default="false">
+  When `true`, Puppet also manages the `ebtables` package, using `pkg_ensure`
+  to control its state. Set this to `true` only if you use ebtables rules on
+  the node. The ebtables service is not managed — only the package.
+</ParamField>
+
+## Platform-specific defaults
+
+The `firewall::params` class selects packages and service names based on the node's OS family and version. The following tables summarise what gets installed and managed per platform.
+
+<Tabs>
+  <Tab title="RedHat / CentOS / AlmaLinux / Rocky">
+
+| Version | Package(s) | IPv4 service(s) | IPv6 service |
+|---------|-----------|-----------------|--------------|
+| 6.x and earlier | `iptables-ipv6` | `iptables` | `ip6tables` |
+| 7.x | `iptables-services` | `iptables` | `ip6tables` |
+| 8.x | `iptables-services`, `nftables` | `iptables`, `nftables` | `ip6tables` |
+| 9.x+ | `iptables-services`, `nftables`, `iptables-nft-services` | `nftables`, `iptables` | `ip6tables` |
+
+On all supported RedHat-family releases, the `firewalld` service is stopped and disabled before the iptables service is started, preventing conflicts. On RHEL 7+ and equivalent, a `systemctl daemon-reload` is triggered when packages change.
+
+For RHEL 7, 6, and CentOS 6, sysconfig files are created at `/etc/sysconfig/iptables` and `/etc/sysconfig/ip6tables` with appropriate SELinux contexts.
+
+  </Tab>
+  <Tab title="Fedora">
+
+| Version | Package | IPv4 service | IPv6 service |
+|---------|---------|-------------|--------------|
+| < 34 | _(none — pre-installed)_ | `iptables` | `ip6tables` |
+| 34+ | `iptables-services` | `iptables` | `ip6tables` |
+
+  </Tab>
+  <Tab title="Amazon Linux">
+
+| Version | Package | IPv4 service | IPv6 service |
+|---------|---------|-------------|--------------|
+| All | _(none)_ | `iptables` | `ip6tables` |
+
+Amazon Linux uses the `systemd` provider explicitly for service management.
+
+  </Tab>
+  <Tab title="Debian / Ubuntu">
+
+| OS | Version | Package | Service |
+|----|---------|---------|---------|
+| Debian | < 8.0 | `iptables-persistent` | `iptables-persistent` |
+| Debian | 8.0+ | `iptables-persistent` | `netfilter-persistent` |
+| Debian | unstable | `netfilter-persistent` | `netfilter-persistent` |
+| Ubuntu | < 14.10 | `iptables-persistent` | `iptables-persistent` |
+| Ubuntu | 14.10+ | `iptables-persistent` | `netfilter-persistent` |
+
+<Note>
+On Debian and Ubuntu, there is no separate IPv6 service — `netfilter-persistent` (or `iptables-persistent`) handles persistence for both protocols. The `service_name_v6` parameter is `undef` on these platforms.
+</Note>
+
+The service on these platforms is not a traditional daemon; calling `start` causes it to load saved rules. The class ensures it is enabled so rules load on boot.
+
+  </Tab>
+  <Tab title="Arch Linux">
+
+| Package | Services managed |
+|---------|-----------------|
+| _(none — pre-installed)_ | `iptables`, `ip6tables` |
+
+On Arch Linux, the class also ensures the persistence rule files exist before starting services: `/etc/iptables/iptables.rules` and `/etc/iptables/ip6tables.rules`.
+
+  </Tab>
+  <Tab title="Gentoo">
+
+| Package | Services managed |
+|---------|-----------------|
+| `net-firewall/iptables` | `iptables`, `ip6tables` |
+
+On Gentoo, the class ensures the persistence save files exist before starting services: `/var/lib/iptables/rules-save` and `/var/lib/iptables/rules-save6`.
+
+  </Tab>
+</Tabs>
+
+## Examples
+
+### Minimal declaration
+
+```puppet
+class { 'firewall': }
+```
+
+### Stop the firewall services
+
+```puppet
+class { 'firewall':
+  ensure => stopped,
+}
+```
+
+### Manage IPv6 independently
+
+Start IPv4 iptables but stop IPv6:
+
+```puppet
+class { 'firewall':
+  ensure    => running,
+  ensure_v6 => stopped,
+}
+```
+
+### Always install the latest package version
+
+```puppet
+class { 'firewall':
+  pkg_ensure => latest,
+}
+```
+
+### Override the service name
+
+```puppet
+class { 'firewall':
+  service_name => 'my-custom-iptables',
+}
+```
+
+### Manage the ebtables package as well
+
+```puppet
+class { 'firewall':
+  ebtables_manage => true,
+}
+```
+
+### Complete node profile example
+
+A typical node profile that sets up default DROP policies and then opens SSH:
+
+```puppet
+class { 'firewall': }
+
+Firewall {
+  before  => Class['profile::firewall::post'],
+  require => Class['profile::firewall::pre'],
+}
+
+class { ['profile::firewall::pre', 'profile::firewall::post']: }
+
+firewall { '022 allow SSH':
+  dport => 22,
+  proto => 'tcp',
+  jump  => 'accept',
+}
+```

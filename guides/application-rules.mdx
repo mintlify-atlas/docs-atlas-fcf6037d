@@ -1,0 +1,114 @@
+---
+title: "Application-Specific Rules"
+description: "Place firewall rules close to the code that needs them using the roles and profiles pattern, and learn how to use rule inversion and node-specific rules."
+keywords: ["firewall", "application rules", "profiles", "roles", "rule inversion", "iptables"]
+---
+
+Puppet does not require you to centralise all firewall rules in a single file. You can place `firewall` resources anywhere in your manifests — and the best practice is to keep them **close to the service they protect**.
+
+## Using the roles and profiles pattern
+
+If you use the [roles and profiles pattern](https://puppetlabs.com/learn/roles-profiles-introduction), define firewall rules inside the relevant profile. This keeps your firewall configuration co-located with the service configuration it belongs to.
+
+The following profile manages Apache and opens the HTTP and HTTPS ports in the same class:
+
+```puppet
+class profile::apache {
+  include apache
+  apache::vhost { 'mysite':
+    ensure => present,
+  }
+
+  firewall { '100 allow http and https access':
+    dport  => [80, 443],
+    proto  => 'tcp',
+    jump   => 'accept',
+  }
+}
+```
+
+<Tip>
+Placing firewall rules in profiles means that when you remove a profile from a node, the associated firewall rule disappears with it — no manual cleanup required.
+</Tip>
+
+## Applying rules to specific nodes
+
+You can apply a firewall rule directly to a single node in your site manifest. Use this when a rule is truly node-specific and does not belong in any profile:
+
+```puppet
+node 'some.node.com' {
+  firewall { '111 open port 111':
+    dport => 111,
+  }
+}
+```
+
+<Note>
+In most cases, prefer putting rules in profiles and applying profiles to nodes. Direct node declarations are harder to audit and reuse.
+</Note>
+
+## Rule inversion
+
+You can invert the match condition of most parameters by prefixing the value with `! ` (exclamation mark followed by a space).
+
+The following parameters support inversion: `connmark`, `ctstate`, `destination`, `dport`, `dst_range`, `dst_type`, `iniface`, `outiface`, `port`, `proto`, `source`, `sport`, `src_range`, and `src_type`.
+
+### Single-value inversion
+
+```puppet
+firewall { '001 disallow esp protocol':
+  jump   => 'accept',
+  proto  => '! esp',
+}
+```
+
+### Multi-condition inversion
+
+When you pass an array, prefix the **first element** of the array with `! ` to negate all values:
+
+```puppet
+firewall { '002 drop NEW external website packets with FIN/RST/ACK set and SYN unset':
+  chain     => 'INPUT',
+  state     => 'NEW',
+  jump      => 'drop',
+  proto     => 'tcp',
+  sport     => ['! http', '443'],
+  source    => '! 10.0.0.0/8',
+  tcp_flags => '! FIN,SYN,RST,ACK SYN',
+}
+```
+
+<Warning>
+For most array attributes, you cannot negate only one value in the array — the negation applies to all values. Prefix the first element with `! ` to negate the entire group.
+</Warning>
+
+### Per-element inversion with `src_type`, `dst_type`, and `ipset`
+
+The `src_type`, `dst_type`, and `ipset` attributes are exceptions: each element of the array can be negated independently.
+
+```puppet
+firewall { '001 allow local disallow anycast':
+  jump     => 'accept',
+  src_type => ['LOCAL', '! ANYCAST'],
+}
+```
+
+This matches traffic whose source type is `LOCAL` but is **not** `ANYCAST` — something that is not possible with the standard array negation behavior.
+
+## Duplicate rule behavior
+
+It is possible for an unmanaged rule to exist on the system with the same comment (title) as a rule defined in your manifest. This configuration is not supported.
+
+When the module detects a duplicate rule, it throws an error and halts its update. You must resolve the duplicate — either by removing the unmanaged rule or by renaming your manifest rule — before Puppet can continue.
+
+<Info>
+The `onduplicaterulebehaviour` parameter that previously allowed configuring this behavior has been removed. Duplicate detection now always raises an error.
+</Info>
+
+## Accessing inline documentation
+
+For a full list of parameters available on the `firewall` resource, run:
+
+```bash
+puppet describe firewall
+```

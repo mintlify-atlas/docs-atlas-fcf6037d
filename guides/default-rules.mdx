@@ -1,0 +1,146 @@
+---
+title: "Default Rules"
+description: "Set up global baseline firewall rules using the pre/post class pattern to keep your nodes safe and avoid locking yourself out during Puppet runs."
+keywords: ["firewall", "default rules", "pre", "post", "iptables", "whitelist"]
+---
+
+The Puppet Firewall module applies rules **immediately** as the catalog executes. Without a safe ordering framework in place, a deny-all rule could be applied before your allow rules, cutting off your Puppet server connection or SSH access mid-run. The `pre`/`post` class pattern solves this by anchoring a baseline set of rules at the very beginning and end of the rule list.
+
+<Info>
+The module uses a whitelist approach: you define exactly which traffic is allowed, and everything that does not match an explicit rule is handled by the post class — either dropped by a rule or by the chain's default policy.
+</Info>
+
+## How the pattern works
+
+You create two helper classes:
+
+- **`my_fw::pre`** — runs first (lowest rule numbers). Allows essential traffic such as ICMP, loopback, and established connections so you never lose access to the node.
+- **`my_fw::post`** — runs last (highest rule numbers). Drops all remaining unmatched traffic.
+
+All application-specific rules are sandwiched between these two classes using `require` and `before` metaparameters on the `Firewall {}` resource default.
+
+## Create `my_fw::pre`
+
+Add the following to `my_fw/manifests/pre.pp`. The `require => undef` inside the class body prevents circular dependencies — the pre rules must not themselves require the pre class.
+
+```puppet
+class my_fw::pre {
+  Firewall {
+    require => undef,
+  }
+
+  # Default firewall rules
+  firewall { '000 accept all icmp':
+    proto => 'icmp',
+    jump  => 'accept',
+  }
+  -> firewall { '001 accept all to lo interface':
+    proto   => 'all',
+    iniface => 'lo',
+    jump    => 'accept',
+  }
+  -> firewall { '002 reject local traffic not on loopback interface':
+    iniface     => '! lo',
+    proto       => 'all',
+    destination => '127.0.0.1/8',
+    jump        => 'reject',
+  }
+  -> firewall { '003 accept related established rules':
+    proto  => 'all',
+    state  => ['RELATED', 'ESTABLISHED'],
+    jump   => 'accept',
+  }
+}
+```
+
+These four rules cover the essentials:
+
+| Rule | Purpose |
+|------|---------|
+| `000 accept all icmp` | Allows ping and other ICMP diagnostics |
+| `001 accept all to lo interface` | Allows all loopback traffic |
+| `002 reject local traffic not on loopback interface` | Prevents spoofed loopback traffic arriving on non-loopback interfaces |
+| `003 accept related established rules` | Keeps existing connections alive during a Puppet run |
+
+## Create `my_fw::post`
+
+Add the following to `my_fw/manifests/post.pp`. The `before => undef` prevents the post class from requiring itself to run before itself.
+
+```puppet
+class my_fw::post {
+  firewall { '999 drop all':
+    proto  => 'all',
+    jump   => 'drop',
+    before => undef,
+  }
+}
+```
+
+<Warning>
+Rule `999 drop all` will silently discard any packet that did not match an earlier rule. Make sure your pre rules and application rules allow all legitimate traffic before this rule is reached.
+</Warning>
+
+## Alternative: use `firewallchain` default policy
+
+Instead of a catch-all drop rule in `my_fw::post`, you can set the default policy on the chain directly. This is equivalent to the drop-all rule but uses the kernel's built-in chain policy mechanism:
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  ensure => present,
+  policy => drop,
+  before => undef,
+}
+```
+
+<Tip>
+Using `firewallchain` policy avoids adding a numbered rule to the chain, which keeps your rule list cleaner and makes it easier to identify the drop-all boundary.
+</Tip>
+
+## Wire everything together
+
+Use a `Firewall {}` resource default block to ensure every firewall rule you define elsewhere automatically runs after `my_fw::pre` and before `my_fw::post`:
+
+```puppet
+Firewall {
+  before  => Class['my_fw::post'],
+  require => Class['my_fw::pre'],
+}
+```
+
+Then declare both classes and include the `firewall` class to install required packages:
+
+```puppet
+class { ['my_fw::pre', 'my_fw::post']: }
+
+class { 'firewall': }
+```
+
+## Full setup flow
+
+<Steps>
+  <Step title="Create my_fw::pre">
+    Add `my_fw/manifests/pre.pp` with the ICMP, loopback, and established-connection rules shown above.
+  </Step>
+  <Step title="Create my_fw::post">
+    Add `my_fw/manifests/post.pp` with the `999 drop all` rule, or use a `firewallchain` policy declaration instead.
+  </Step>
+  <Step title="Set global Firewall defaults">
+    In your site manifest or role/profile, declare the `Firewall {}` resource default with `before` and `require` pointing at the pre and post classes.
+  </Step>
+  <Step title="Declare the classes">
+    Include `my_fw::pre`, `my_fw::post`, and `class { 'firewall': }` on every node that should be managed.
+  </Step>
+  <Step title="Add application rules">
+    Place firewall resources for individual services in the appropriate profiles. They will automatically inherit the ordering from the resource default.
+  </Step>
+</Steps>
+
+## Why ordering matters
+
+The Firewall module applies rules in the order they appear in the catalog, **not** in alphabetical order. Without `require` and `before` constraints, Puppet may apply a `999 drop all` rule before your SSH allow rule, locking you out of the node.
+
+The pre/post pattern guarantees that:
+
+1. Essential baseline rules are always in place first.
+2. Application-specific allow rules are always evaluated before the final drop.
+3. Puppet runs remain safe even on the very first apply.

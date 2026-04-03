@@ -1,0 +1,127 @@
+---
+title: "Rule Ordering"
+description: "Understand how rule title numbering controls iptables rule order, how to use require and before to anchor pre/post rules, and known ordering issues."
+keywords: ["firewall", "rule ordering", "iptables", "pre", "post", "MCollective", "catalog ordering"]
+---
+
+The order in which iptables rules are evaluated is critical. A deny-all rule that appears before an SSH allow rule will block your connection. The Puppet Firewall module provides a deterministic ordering mechanism based on the rule title's numeric prefix.
+
+## Title-based ordering
+
+Every `firewall` resource title must begin with a number. The module uses this number to control the position of the rule in the iptables chain:
+
+```puppet
+firewall { '000 accept all icmp':
+  proto => 'icmp',
+  jump  => 'accept',
+}
+
+firewall { '999 drop all other requests':
+  jump => 'drop',
+}
+```
+
+Rules with lower numbers are inserted earlier in the chain. `000` runs first; `999` runs last. The full name (including the descriptive text after the number) is stored as the iptables rule comment so you can identify rules when running `iptables -L`.
+
+<Info>
+Rule titles must match the pattern `/^\d+[[:graph:][:space:]]+$/`. Always prefix your rules with a zero-padded number to ensure consistent sorting across the full range 000–999.
+</Info>
+
+## Reserved range: 9000–9999
+
+The ordering range **9000–9999 is reserved for unmanaged rules**. Do not define any `firewall` resources with titles in this range. Rules discovered in this range during a Puppet run are treated as unmanaged and may be subject to purging.
+
+<Warning>
+Defining firewall rules with titles in the 9000–9999 range is unsupported and may cause unexpected behavior when purging is enabled.
+</Warning>
+
+## Catalog ordering vs rule title ordering
+
+The module applies rules in the order they appear in the Puppet catalog, not necessarily in alphabetical order by title. This means that without explicit ordering constraints, a rule numbered `999` could be applied to iptables before a rule numbered `001` if Puppet processes it first.
+
+To guarantee that your pre and post rules always run at the correct positions, use `require` and `before` metaparameters.
+
+## Anchoring pre and post rules
+
+### Using `Firewall {}` resource defaults
+
+Set a resource default block at the top scope of your manifests so that every `firewall` resource automatically depends on `my_fw::pre` and runs before `my_fw::post`:
+
+```puppet
+Firewall {
+  before  => Class['my_fw::post'],
+  require => Class['my_fw::pre'],
+}
+```
+
+This single declaration ensures:
+
+- `my_fw::pre` is applied before any rule that inherits this default.
+- `my_fw::post` is applied after every rule that inherits this default.
+
+### Overriding in pre and post classes
+
+Inside `my_fw::pre`, override the resource default to prevent the pre rules from requiring themselves:
+
+```puppet
+class my_fw::pre {
+  Firewall {
+    require => undef,
+  }
+  # ... pre rules ...
+}
+```
+
+Inside `my_fw::post`, override `before` so the post rules are not required to precede themselves:
+
+```puppet
+class my_fw::post {
+  firewall { '999 drop all':
+    proto  => 'all',
+    jump   => 'drop',
+    before => undef,
+  }
+}
+```
+
+## Full ordering setup
+
+<Steps>
+  <Step title="Declare pre and post classes">
+    Create `my_fw::pre` and `my_fw::post` with `require => undef` and `before => undef` respectively, as shown in the [Default Rules](/guides/default-rules) guide.
+  </Step>
+  <Step title="Set global Firewall resource defaults">
+    In your site manifest or base profile, declare:
+
+    ```puppet
+    Firewall {
+      before  => Class['my_fw::post'],
+      require => Class['my_fw::pre'],
+    }
+    ```
+  </Step>
+  <Step title="Include both classes">
+    ```puppet
+    class { ['my_fw::pre', 'my_fw::post']: }
+    ```
+  </Step>
+  <Step title="Number your rules correctly">
+    Use numbers in the range 001–899 for application rules. Leave 000 for essential pre rules and 999 for the final drop.
+  </Step>
+</Steps>
+
+## Known issue: MCollective reverses rule order
+
+If you use MCollective to kick off Puppet runs in Puppet Enterprise 2016.1, 2015.3, 2015.2, or 3.8.x, firewall rules may appear in **reverse order** after the run.
+
+In many configurations, the last rule drops all packets. If the rule order is reversed, this drop-all rule ends up first and network connectivity fails immediately.
+
+<Warning>
+Do not use MCollective (`mco puppet runonce`) to trigger Puppet runs on nodes managed by the firewall module. This is a known issue in the affected PE versions.
+</Warning>
+
+To avoid this problem, trigger Puppet runs using one of these alternatives instead:
+
+- Run `puppet agent -t` on the command line.
+- Use a cron job to schedule agent runs.
+- Use the **Run Puppet** button in the PE console.

@@ -1,0 +1,139 @@
+---
+title: "NAT and Advanced Rules"
+description: "Configure SNAT, MASQUERADE, DNAT, TCP MSS clamping, traffic mirroring with TEE, custom chains, and NFLOG using the Puppet Firewall module."
+keywords: ["firewall", "NAT", "SNAT", "DNAT", "MASQUERADE", "TCPMSS", "TEE", "NFLOG", "firewallchain", "iptables"]
+---
+
+Beyond simple accept/drop rules, the Puppet Firewall module gives you access to iptables' full feature set: network address translation, packet mangling, traffic mirroring, custom chains, and kernel-level logging via NFLOG.
+
+## SNAT and MASQUERADE
+
+Source NAT rewrites the source address of outgoing packets. Use `MASQUERADE` when the outbound IP address is dynamic (e.g. a DHCP-assigned interface), or `SNAT` with `tosource` when you have a fixed external IP.
+
+The following example sets up MASQUERADE for the source network `10.1.2.0/24` going out via `eth0`:
+
+```puppet
+firewall { '100 snat for network foo2':
+  chain    => 'POSTROUTING',
+  jump     => 'MASQUERADE',
+  proto    => 'all',
+  outiface => 'eth0',
+  source   => '10.1.2.0/24',
+  table    => 'nat',
+}
+```
+
+<Note>
+NAT rules must be placed in the `nat` table. The chain for outbound NAT is `POSTROUTING`. Make sure your pre/post class ordering accounts for rules in non-default tables and chains.
+</Note>
+
+## DNAT
+
+Destination NAT rewrites the destination address of incoming packets, typically to redirect traffic to an internal host. Use `jump => 'DNAT'` together with the `todest` parameter:
+
+```puppet
+firewall { '100 dnat web traffic to internal host':
+  chain   => 'PREROUTING',
+  table   => 'nat',
+  proto   => 'tcp',
+  dport   => 80,
+  jump    => 'DNAT',
+  todest  => '192.168.1.10:8080',
+}
+```
+
+The `todest` parameter accepts a single IP address, an IP range, or an address with an optional port or port range in the format `[ipaddr[-ipaddr]][:port[-port[/baseport]]]`.
+
+## TCP MSS clamping
+
+VPN tunnels often have a lower MTU than the path between endpoints, causing packets to be fragmented or silently dropped. You can clamp the TCP Maximum Segment Size (MSS) to prevent this:
+
+```puppet
+firewall { '110 TCPMSS for VPN clients':
+  chain     => 'FORWARD',
+  table     => 'mangle',
+  source    => '10.0.2.0/24',
+  proto     => 'tcp',
+  tcp_flags => 'SYN,RST SYN',
+  mss       => '1361:1541',
+  set_mss   => '1360',
+  jump      => 'TCPMSS',
+}
+```
+
+This rule matches TCP SYN packets from the `10.0.2.0/24` network that have an MSS between 1361 and 1541, and rewrites the MSS to 1360 bytes.
+
+## Traffic mirroring with TEE
+
+The TEE target clones a packet and redirects the clone to another host on the local network segment. Use this for passive traffic analysis or IDS mirroring:
+
+```puppet
+firewall { '503 Mirror traffic to IDS':
+  proto   => 'all',
+  jump    => 'TEE',
+  gateway => '10.0.0.2',
+  chain   => 'PREROUTING',
+  table   => 'mangle',
+}
+```
+
+The `gateway` parameter is the IP address of the target host that will receive the cloned packets.
+
+<Warning>
+TEE duplicates all matched traffic. Applying this rule without a specific `source`, `destination`, or `proto` filter (as shown above) will mirror every packet hitting the PREROUTING chain. Add match conditions to limit the scope.
+</Warning>
+
+## Custom chains with `firewallchain`
+
+You can create user-defined chains to organise rules and reduce duplication. First declare the chain with `firewallchain`, then jump to it from a built-in chain, and finally add rules inside the custom chain:
+
+```puppet
+firewall { '100 forward to MY_CHAIN':
+  chain   => 'INPUT',
+  jump    => 'MY_CHAIN',
+}
+
+# The namevar format is chain_name:table:protocol
+firewallchain { 'MY_CHAIN:filter:IPv4':
+  ensure  => present,
+}
+
+firewall { '100 my rule':
+  chain   => 'MY_CHAIN',
+  jump    => 'accept',
+  proto   => 'tcp',
+  dport   => 5000,
+}
+```
+
+<Info>
+The `firewallchain` namevar must follow the format `{chain}:{table}:{protocol}`. Valid protocol values are `IPv4`, `IPv6`, and `ethernet`. For example: `MY_CHAIN:filter:IPv4`.
+</Info>
+
+The `firewallchain` resource also accepts a `policy` parameter for built-in chains, allowing you to set the default chain policy without a numbered drop-all rule.
+
+## NFLOG
+
+NFLOG sends matched packets to a userspace logging daemon (such as `ulogd`) via the netlink socket. This is more efficient than the `LOG` target for high-traffic scenarios:
+
+```puppet
+firewall {'666 for NFLOG':
+  proto           => 'all',
+  jump            => 'NFLOG',
+  nflog_group     => 3,
+  nflog_prefix    => 'nflog-test',
+  nflog_size      => 256,
+  nflog_threshold => 1,
+}
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `nflog_group` | The netlink group number (1–65535) packets are sent to. |
+| `nflog_prefix` | A prefix string added to each log message (up to 64 characters). |
+| `nflog_size` | Maximum number of bytes of the packet to copy to userspace. |
+| `nflog_threshold` | Number of packets to queue in the kernel before sending to userspace. Higher values reduce overhead but increase latency. |
+
+<Tip>
+Set `nflog_threshold` higher than 1 if you are logging high volumes of traffic to reduce context-switching overhead between the kernel and userspace.
+</Tip>

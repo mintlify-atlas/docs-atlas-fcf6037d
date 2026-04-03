@@ -1,0 +1,138 @@
+---
+title: "Upgrading"
+description: "Upgrade the Puppet Firewall module, including migration steps for breaking changes in v7.0.0."
+keywords: ['puppet', 'firewall', 'upgrade', 'migration', 'v7', 'breaking changes']
+---
+
+## Upgrading from v0.2.0 or later
+
+For most upgrades, use the Puppet module tool:
+
+```bash
+puppet module upgrade puppetlabs/firewall
+```
+
+This applies to any upgrade within the v0.x, v1.x, v2.x, v3.x, v4.x, v5.x, and v6.x series.
+
+## Migrating to v7.0.0
+
+Version 7.0.0 introduced a major rework of the module to adopt the [puppet-resource_api](https://github.com/puppetlabs/puppet-resource_api). This change improves the module's long-term maintainability, but it includes several **breaking changes** that require you to update your manifests.
+
+<Warning>
+  Review all of the breaking changes below before upgrading to v7.0.0. Manifests that are not updated will fail after the upgrade.
+</Warning>
+
+### Breaking change 1: `provider` renamed to `protocol`
+
+The `provider` attribute in the `firewall` type has been renamed to `protocol`. This aligns it with the same attribute in `firewallchain`, and is required because the resource_api forbids using `provider` as an attribute name.
+
+The accepted values have also changed: use `IPv4` or `IPv6` instead of `iptables` or `ip6tables`. The old values are still accepted as input, but `IPv4` and `IPv6` are preferred.
+
+<CodeGroup>
+
+```puppet Before (v6 and earlier)
+firewall { '571 - hop_limit':
+  ensure    => present,
+  proto     => 'tcp',
+  dport     => '571',
+  action    => 'ACCEPT',
+  hop_limit => '5',
+  provider  => 'ip6tables',
+}
+```
+
+```puppet After (v7+)
+firewall { '571 - hop_limit':
+  ensure    => present,
+  proto     => 'tcp',
+  dport     => '571',
+  jump      => 'accept',
+  hop_limit => '5',
+  protocol  => 'IPv6',
+}
+```
+
+</CodeGroup>
+
+### Breaking change 2: `action` removed, use `jump`
+
+The `action` attribute has been removed. It was a restricted version of `jump` — both managed the same underlying iptables target. All values previously passed to `action` should now be passed to `jump` instead.
+
+<CodeGroup>
+
+```puppet Before (v6 and earlier)
+firewall { '000 accept all icmp requests':
+  proto  => 'icmp',
+  action => 'accept',
+}
+```
+
+```puppet After (v7+)
+firewall { '000 accept all icmp requests':
+  proto => 'icmp',
+  jump  => 'accept',
+}
+```
+
+</CodeGroup>
+
+### Breaking change 3: strict types for all attributes
+
+Strict types are now enforced for all attributes. In most cases this requires no changes, but some manifests may need to be updated if attribute values were previously passed in a non-standard form (for example, integers as strings where a typed value is expected).
+
+<Tip>
+  Run `puppet parser validate` on your manifests after updating them to catch type errors before applying the catalog.
+</Tip>
+
+### Breaking change 4: array negation syntax
+
+Attributes that accept both arrays and negated values have been updated:
+
+- **For attributes that require all values to be negated together:** you now only need to negate the first value in the array. Negating all values is still accepted.
+- **For attributes that allow individual values to be negated separately** (such as `src_type`, `dst_type`, and `ipset`): each value can still be negated independently. Check individual attribute descriptions for details.
+
+The `sport` and `dport` attributes now accept either `:` or `-` as a range separator, with `:` preferred because it matches what iptables uses internally.
+
+<CodeGroup>
+
+```puppet Before (v6 and earlier)
+firewall { '560 - negated ports':
+  proto  => 'tcp',
+  sport  => ['! 560-570', '! 580'],
+  action => 'accept',
+}
+```
+
+```puppet After (v7+)
+firewall { '560 - negated ports':
+  proto  => 'tcp',
+  sport  => ['! 560:570', '580'],
+  jump   => 'accept',
+}
+```
+
+</CodeGroup>
+
+<Note>
+  Notice that in the updated form, only the first value needs the `!` prefix to negate the entire group. The range separator has also been updated from `-` to `:`.
+</Note>
+
+## Upgrading within v8.x
+
+The v8.x series contains no breaking changes for manifests. Upgrade using the Puppet module tool:
+
+```bash
+puppet module upgrade puppetlabs/firewall
+```
+
+Notable changes across the v8.x series include:
+
+| Version | Notable changes |
+|---------|----------------|
+| v8.0.0 | Dropped support for RedHat/Scientific/OracleLinux 6 |
+| v8.1.0 | Added support for ip[6]tables protocol in `firewallchain` |
+| v8.1.1 | Added support for Debian 12 |
+| v8.2.0 | Fixed stderr/stdout separation when scanning rules |
+| v8.3.0 | Dropped support for Puppet 7; added IPv6 rule saving for SUSE |
+
+Refer to the [CHANGELOG](https://github.com/puppetlabs/puppetlabs-firewall/blob/main/CHANGELOG.md) for the complete list of fixes and additions in each release.

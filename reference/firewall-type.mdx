@@ -1,0 +1,916 @@
+---
+title: "firewall Resource Type"
+description: "Reference for the firewall Puppet resource type, which manages iptables firewall rules."
+---
+
+## Overview
+
+The `firewall` resource type manages firewall rules on Linux systems via iptables. Each resource represents a single iptables rule and its position in a chain.
+
+**Autorequires:**
+
+- If Puppet is managing the iptables chains specified in the `chain` or `jump` parameters, the `firewall` resource will autorequire those `firewallchain` resources.
+- If Puppet is managing the `iptables`, `iptables-persistent`, or `iptables-services` packages, the `firewall` resource will autorequire those packages to ensure that required binaries are installed.
+
+## Providers
+
+The `iptables` provider is the default and only supported provider for this resource type.
+
+- **Required binaries:** `iptables-save`, `iptables`
+- **Default for:** `kernel == linux`
+
+## Supported features
+
+<AccordionGroup>
+  <Accordion title="View all supported features">
+
+| Feature | Description |
+|---|---|
+| `address_type` | Match on source or destination address type. |
+| `bpf` | Use Berkeley Packet Filter rules. |
+| `clusterip` | Configure a simple cluster of nodes sharing an IP and MAC address. |
+| `condition` | Match if a specific condition variable is (un)set (requires xtables-addons). |
+| `connection_limiting` | Connection limiting features. |
+| `conntrack` | Connection tracking features. |
+| `ct_target` | Set connection tracking parameters for a packet or its associated connection. |
+| `dnat` | Destination NATing. |
+| `hashlimit` | Use the hashlimit module. |
+| `hop_limiting` | Hop limiting features. |
+| `icmp_match` | Match ICMP types. |
+| `interface_match` | Interface matching. |
+| `iprange` | Match on source or destination IP range. |
+| `ipsec_dir` | Match IPsec policy direction. |
+| `ipsec_policy` | Match IPsec policy. |
+| `iptables` | The provider provides iptables features. |
+| `isfirstfrag` | Match the first fragment of a fragmented IPv6 packet. |
+| `isfragment` | Match fragments. |
+| `ishasmorefrags` | Match a non-last fragment of a fragmented IPv6 packet. |
+| `islastfrag` | Match the last fragment of an IPv6 packet. |
+| `ipset` | Match against an ipset list. |
+| `ipvs` | Match IP Virtual Server packets. |
+| `length` | Match the length of the layer-3 payload. |
+| `log_ip_options` | Log IP/IPv6 packet header. |
+| `log_level` | Control the log level. |
+| `log_prefix` | Add prefixes to log messages. |
+| `log_tcp_options` | Log TCP packet header. |
+| `log_tcp_sequence` | Log TCP sequence numbers. |
+| `log_uid` | Log the userid of the process which generated the packet. |
+| `mark` | Match or set the netfilter mark value associated with the packet. |
+| `mask` | Match recent rules based on the IPv4 mask. |
+| `mss` | Match or set the TCP MSS value. |
+| `netmap` | Map entire subnets via source or destination NAT rules. |
+| `nflog_group` | Set the group number for NFLOG. |
+| `nflog_prefix` | Set a prefix for nflog messages. |
+| `nflog_size` | Set the max size of a message to send to nflog. |
+| `nflog_threshold` | Set nflog_threshold. |
+| `owner` | Match owners (UID/GID). |
+| `pkttype` | Match a packet type. |
+| `queue_bypass` | Allow packets to bypass queue_num if userspace process is not listening. |
+| `queue_num` | Send packets to a specific NFQUEUE. |
+| `random_fully` | Use `--random-fully` flag for port mapping. |
+| `rate_limiting` | Rate limiting features. |
+| `recent_limiting` | The netfilter recent module. |
+| `reject_type` | Control reject messages. |
+| `set_mss` | Set the TCP MSS of a packet. |
+| `snat` | Source NATing. |
+| `socket` | Match open sockets. |
+| `state_match` | Match stateful firewall states. |
+| `string_matching` | Match a given string by using some pattern matching strategy. |
+| `tcp_flags` | Match on particular TCP flag settings. |
+
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### Basic accept rule
+
+```puppet
+firewall { '100 allow http and https':
+  dport => [80, 443],
+  proto => 'tcp',
+  jump  => 'accept',
+}
+```
+
+### Drop rule
+
+```puppet
+firewall { '200 drop all other inbound traffic':
+  chain  => 'INPUT',
+  proto  => 'all',
+  jump   => 'DROP',
+}
+```
+
+### Stateful connection tracking
+
+```puppet
+firewall { '010 accept established and related connections':
+  state => ['ESTABLISHED', 'RELATED'],
+  jump  => 'accept',
+}
+```
+
+### Port-based rule
+
+```puppet
+firewall { '022 allow ssh':
+  dport   => 22,
+  proto   => 'tcp',
+  jump    => 'ACCEPT',
+  source  => '10.0.0.0/8',
+}
+```
+
+## Parameters
+
+### `name`
+
+**Type:** `Pattern[/(^\d+(?:[ \t-]\S+)+$)/]`
+
+The canonical name of the rule. This name is also used for ordering, so you must prefix the rule with a number:
+
+```puppet
+firewall { '000 this runs first': ... }
+firewall { '999 this runs last': ... }
+```
+
+Depending on the provider, the rule name is stored using the comment feature of the underlying firewall subsystem.
+
+---
+
+## Properties
+
+### Core
+
+<ParamField path="ensure" type="Enum[present, absent]" default="present">
+  Whether this rule should be present or absent on the target system.
+</ParamField>
+
+<ParamField path="chain" type="String[1]" default="INPUT">
+  Name of the chain the rule will be a part of. Ensure the chain you choose exists within your set table. Can be one of the built-in chains (`INPUT`, `FORWARD`, `OUTPUT`, `PREROUTING`, `POSTROUTING`) or a user-defined chain name.
+</ParamField>
+
+<ParamField path="table" type="Enum[nat, mangle, filter, raw, rawpost, broute, security]" default="filter">
+  The table the rule will exist in. Valid options are `nat`, `mangle`, `filter`, `raw`, `rawpost`, `broute`, and `security`.
+</ParamField>
+
+<ParamField path="proto" type="Optional[Pattern[...]]" default="tcp">
+  The specific protocol to match for this rule. Accepted values include `tcp`, `udp`, `icmp`, `esp`, `ah`, `vrrp`, `carp`, `igmp`, `ipv4`, `ospf`, `gre`, `cbt`, `sctp`, `pim`, `all`, and `ipencap`. Can be negated by prefixing with `! `.
+</ParamField>
+
+<ParamField path="protocol" type="Enum[iptables, ip6tables, IPv4, IPv6]" default="IPv4">
+  The protocol used to set the rule. Allowed values are `iptables`, `ip6tables`, `IPv4`, and `IPv6`. Previously defined as `provider`, but renamed because the resource_api does not allow `provider` as an attribute title.
+</ParamField>
+
+<ParamField path="jump" type="Optional[String[1]]">
+  The value for the iptables `--jump` parameter — the action to perform on a match. Common values are:
+
+  - `ACCEPT` — the packet is accepted
+  - `REJECT` — the packet is rejected with a suitable ICMP response
+  - `DROP` — the packet is dropped
+
+  Other valid values include `QUEUE`, `RETURN`, `DNAT`, `SNAT`, `LOG`, `NFLOG`, `NETMAP`, `MASQUERADE`, `REDIRECT`, `MARK`, and `CT`. Any valid chain name is also allowed.
+
+  If you specify no value, the rule matches but performs no action.
+</ParamField>
+
+<ParamField path="goto" type="Optional[String[1]]">
+  The value for the iptables `--goto` parameter. Similar to `jump`, but the rule does not return to the calling chain after reaching the end of the target chain. Accepts the same target values as `jump`.
+</ParamField>
+
+---
+
+### Matching
+
+<AccordionGroup>
+  <Accordion title="Address and interface matching">
+
+<ParamField path="source" type="Optional[String[1]]">
+  The source address to match. For example:
+
+  ```puppet
+  source => '192.168.2.0/24'
+  ```
+
+  Negate by putting `! ` in front:
+
+  ```puppet
+  source => '! 192.168.2.0/24'
+  ```
+
+  Also accepts IPv6 addresses if your provider supports it.
+</ParamField>
+
+<ParamField path="destination" type="Optional[String[1]]">
+  The destination address to match. For example:
+
+  ```puppet
+  destination => '192.168.1.0/24'
+  ```
+
+  Can be negated with `! `. Also accepts IPv6 addresses.
+</ParamField>
+
+<ParamField path="src_range" type="Optional[String[1]]">
+  The source IP range in `IP1-IP2` format. For example:
+
+  ```puppet
+  src_range => '192.168.1.1-192.168.1.10'
+  ```
+
+  Can be negated with `! `.
+</ParamField>
+
+<ParamField path="dst_range" type="Optional[String[1]]">
+  The destination IP range in `IP1-IP2` format. For example:
+
+  ```puppet
+  dst_range => '192.168.1.1-192.168.1.10'
+  ```
+
+  Can be negated with `! `.
+</ParamField>
+
+<ParamField path="src_type" type="Optional[Variant[Array, Pattern]]">
+  The source address type. Accepted values: `UNSPEC`, `UNICAST`, `LOCAL`, `BROADCAST`, `ANYCAST`, `MULTICAST`, `BLACKHOLE`, `UNREACHABLE`, `PROHIBIT`, `THROW`, `NAT`, `XRESOLVE`. Accepts `--limit-iface-in` and `--limit-iface-out` flags. Can be negated with `!`. Accepts a single value or array.
+</ParamField>
+
+<ParamField path="dst_type" type="Optional[Variant[Array, Pattern]]">
+  The destination address type. Same values as `src_type`. Accepts `--limit-iface-in` and `--limit-iface-out` flags. Can be negated with `!`. Accepts a single value or array.
+</ParamField>
+
+<ParamField path="iniface" type="Optional[Pattern[...]]">
+  Input interface to filter on. Supports interface aliases like `eth0:0`. Negate with `! `:
+
+  ```puppet
+  iniface => '! lo'
+  ```
+</ParamField>
+
+<ParamField path="outiface" type="Optional[Pattern[...]]">
+  Output interface to filter on. Supports interface aliases like `eth0:0`. Negate with `! `:
+
+  ```puppet
+  outiface => '! lo'
+  ```
+</ParamField>
+
+<ParamField path="mac_source" type="Optional[Pattern[...]]">
+  MAC source address to match. Format: `XX:XX:XX:XX:XX:XX`. Can be negated with `! `.
+</ParamField>
+
+<ParamField path="pkttype" type="Optional[Enum[unicast, broadcast, multicast]]">
+  Sets the packet type to match.
+</ParamField>
+
+<ParamField path="src_cc" type="Optional[Pattern[...]]">
+  Source country code attribute for the geoip module. Format: two uppercase letters, comma-separated for multiple (e.g., `US,CA`).
+</ParamField>
+
+<ParamField path="dst_cc" type="Optional[Pattern[...]]">
+  Destination country code attribute for the geoip module. Format: two uppercase letters, comma-separated for multiple (e.g., `US,CA`).
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="Port matching">
+
+<ParamField path="sport" type="Optional[Variant[Array, Pattern, Integer]]">
+  The source port to match (if the protocol supports ports). Accepts a single value or an array.
+
+  Port ranges use `:` or `-` as separator:
+
+  ```puppet
+  sport => '1:1024'
+  ```
+
+  Negate with `! `. When negating an array, place `! ` at the start of the first element — this negates all values.
+</ParamField>
+
+<ParamField path="dport" type="Optional[Variant[Array, Pattern, Integer]]">
+  The destination port to match (if the protocol supports ports). Accepts a single value or an array.
+
+  Port ranges use `:` or `-` as separator:
+
+  ```puppet
+  dport => '1:1024'
+  ```
+
+  Negate with `! `. When negating an array, place `! ` at the start of the first element — this negates all values.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="State matching">
+
+<ParamField path="state" type="Optional[Variant[Pattern, Array]]">
+  Matches a packet based on its state in the firewall stateful inspection table. Values can be `INVALID`, `ESTABLISHED`, `NEW`, `RELATED`, or `UNTRACKED`. Accepts a single value or array.
+
+  Can be negated with `!`. When negating an array, place `! ` at the start of the first element.
+
+  ```puppet
+  state => ['ESTABLISHED', 'RELATED']
+  ```
+</ParamField>
+
+<ParamField path="ctstate" type="Optional[Variant[Pattern, Array]]">
+  Matches a packet based on its conntrack state. Values can be `INVALID`, `ESTABLISHED`, `NEW`, `RELATED`, `UNTRACKED`, `SNAT`, or `DNAT`. Uses the conntrack module. Accepts a single value or array.
+
+  ```puppet
+  ctstate => ['ESTABLISHED', 'RELATED']
+  ```
+</ParamField>
+
+<ParamField path="ctstatus" type="Optional[Variant[Pattern, Array]]">
+  Matches a packet based on its conntrack status. Values can be `EXPECTED`, `SEEN_REPLY`, `ASSURED`, `CONFIRMED`, or `NONE`. Accepts a single value or array.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="ICMP matching">
+
+<ParamField path="icmp" type="Optional[Variant[String, Integer]]">
+  When matching ICMP packets, the type of ICMP packet to match. A value of `any` is not supported — omit the parameter to match all ICMP types. An array is not supported; use separate rules for multiple ICMP types.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="TCP flags and options">
+
+<ParamField path="tcp_flags" type="Optional[Pattern[...]]">
+  Match when the TCP flags are as specified. Provide a comma-separated list of flag names for the mask, a space, then a comma-separated list of flags that should be set. Flags: `FIN`, `SYN`, `RST`, `PSH`, `ACK`, `URG`, `ALL`, `NONE`. Can be negated with `! `.
+
+  ```puppet
+  tcp_flags => 'FIN,SYN,RST,ACK SYN'
+  ```
+</ParamField>
+
+<ParamField path="tcp_option" type="Optional[Variant[Pattern, Integer[0,255]]]">
+  Match when the TCP option is present or absent. Given as a single TCP option number (0–255), optionally prefixed with `! ` to match on absence. Only one TCP option can be matched per rule.
+</ParamField>
+
+<ParamField path="mss" type="Optional[Pattern[...]]">
+  Match a given TCP MSS value or range. Can be negated with `! `.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="Fragment matching">
+
+<ParamField path="isfragment" type="Optional[Boolean]">
+  Set to `true` to match TCP fragments. Requires `proto` to be set to `tcp`.
+</ParamField>
+
+<ParamField path="isfirstfrag" type="Optional[Boolean]">
+  Matches if the packet is the first fragment. IPv6 specific.
+</ParamField>
+
+<ParamField path="ishasmorefrags" type="Optional[Boolean]">
+  Matches if the packet has its `more fragments` bit set. IPv6 specific.
+</ParamField>
+
+<ParamField path="islastfrag" type="Optional[Boolean]">
+  Matches if the packet is the last fragment. IPv6 specific.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="Owner matching">
+
+<ParamField path="uid" type="Optional[Variant[String, Integer]]">
+  UID or username owner matching rule. Accepts a single argument only (iptables does not accept multiple UIDs in a single statement). Negate with `! ` in front of the value.
+</ParamField>
+
+<ParamField path="gid" type="Optional[Variant[String, Integer]]">
+  GID or group owner matching rule. Accepts a single argument only. Negate with `! ` in front of the value.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="Physical device matching">
+
+<ParamField path="physdev_in" type="Optional[Pattern[...]]">
+  Match if the packet is entering a bridge from the given interface. Can be negated with `! `.
+</ParamField>
+
+<ParamField path="physdev_out" type="Optional[Pattern[...]]">
+  Match if the packet is leaving a bridge via the given interface. Can be negated with `! `.
+</ParamField>
+
+<ParamField path="physdev_is_bridged" type="Optional[Boolean]">
+  Match if the packet is traversing a bridge.
+</ParamField>
+
+<ParamField path="physdev_is_in" type="Optional[Boolean]">
+  Matches if the packet has entered through a bridge interface.
+</ParamField>
+
+<ParamField path="physdev_is_out" type="Optional[Boolean]">
+  Matches if the packet will leave through a bridge interface.
+</ParamField>
+
+  </Accordion>
+
+  <Accordion title="String and BPF matching">
+
+<ParamField path="string" type="Optional[String[1]]">
+  String matching feature. Matches the packet against the given pattern. Negate with `! ` at the beginning.
+</ParamField>
+
+<ParamField path="string_hex" type="Optional[Pattern[...]]">
+  Matches the packet against a hex pattern given as `|hex bytes|`. Negate with `! `.
+</ParamField>
+
+<ParamField path="string_algo" type="Optional[Enum[bm, kmp]]">
+  String matching pattern matching strategy.
+</ParamField>
+
+<ParamField path="string_from" type="Optional[Integer[1]]">
+  String matching offset from which to start looking for a match.
+</ParamField>
+
+<ParamField path="string_to" type="Optional[Integer[1]]">
+  String matching offset up to which to scan.
+</ParamField>
+
+<ParamField path="bytecode" type="Optional[String[1]]">
+  Match using Linux Socket Filter. Expects a BPF program in decimal format as generated by the `nfbpf_compile` utility.
+</ParamField>
+
+<ParamField path="u32" type="Optional[Pattern[...]]">
+  Enable the u32 module for raw byte matching in packet headers. For example:
+
+  ```puppet
+  firewall { '032 u32 test':
+    ensure => present,
+    table  => 'mangle',
+    chain  => 'PREROUTING',
+    u32    => '0x4&0x1fff=0x0&&0x0&0xf000000=0x5000000',
+    jump   => 'DROP',
+  }
+  ```
+</ParamField>
+
+<ParamField path="ipset" type="Optional[Variant[Pattern, Array]]">
+  Matches against the specified ipset list. Requires the ipset kernel module. The value is the name of the list, followed by a space, then `src` and/or `dst` separated by a comma:
+
+  ```puppet
+  ipset => 'denylist src,dst'
+  ```
+
+  Can be negated with `! `. Values can be negated independently.
+</ParamField>
+
+<ParamField path="ipvs" type="Optional[Boolean]">
+  Match IP Virtual Server packets.
+</ParamField>
+
+<ParamField path="socket" type="Optional[Boolean]">
+  If `true`, matches if an open socket can be found by doing a socket lookup on the packet.
+</ParamField>
+
+<ParamField path="condition" type="Optional[String[1]]">
+  Match on boolean value (0/1) stored in `/proc/net/nf_condition/name`.
+</ParamField>
+
+<ParamField path="cgroup" type="Optional[String[1]]">
+  Matches against the net_cls cgroup ID of the packet. Negate with `! ` at the beginning.
+</ParamField>
+
+<ParamField path="length" type="Optional[Pattern[...]]">
+  Sets the length of the layer-3 payload to match. Examples: `'500'`, `'5:400'`.
+</ParamField>
+
+<ParamField path="rpfilter" type="Optional[Variant[Enum, Array]]">
+  Enable the rpfilter module. Valid values: `loose`, `validmark`, `accept-local`, `invert`. Accepts a single value or array.
+</ParamField>
+
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### Connection tracking
+
+<ParamField path="connmark" type="Optional[Pattern[...]]">
+  Match the Netfilter mark value associated with the packet. Accepts `mark/mask` or `mark` format. Will be converted to hex if not already. Negate with `! `.
+</ParamField>
+
+<ParamField path="connlimit_above" type="Optional[Integer]">
+  Connection limiting value for matched connections above n.
+</ParamField>
+
+<ParamField path="connlimit_upto" type="Optional[Integer]">
+  Connection limiting value for matched connections below or equal to n.
+</ParamField>
+
+<ParamField path="connlimit_mask" type="Optional[Integer[0,128]]">
+  Connection limiting by subnet mask for matched connections. IPv4 range: 0–32. IPv6 range: 0–128.
+</ParamField>
+
+<ParamField path="ctdir" type="Optional[Enum[REPLY, ORIGINAL]]">
+  Matches a packet flowing in the specified direction using the conntrack module. Values: `REPLY` or `ORIGINAL`. If not specified, matches packets in both directions.
+</ParamField>
+
+<ParamField path="ctexpire" type="Optional[Pattern[...]]">
+  Matches a packet based on lifetime remaining in seconds or a range of seconds using the conntrack module. For example: `'100'` or `'100:150'`.
+</ParamField>
+
+<ParamField path="ctproto" type="Optional[Variant[Pattern, Integer]]">
+  The specific layer-4 protocol number to match using the conntrack module.
+</ParamField>
+
+<AccordionGroup>
+  <Accordion title="Conntrack address and port parameters">
+
+| Parameter | Type | Description |
+|---|---|---|
+| `ctorigsrc` | `Optional[String[1]]` | Original source address using the conntrack module. Supports CIDR and `! ` negation. |
+| `ctorigdst` | `Optional[String[1]]` | Original destination address using the conntrack module. Supports CIDR and `! ` negation. |
+| `ctreplsrc` | `Optional[String[1]]` | Reply source address using the conntrack module. Supports CIDR and `! ` negation. |
+| `ctrepldst` | `Optional[String[1]]` | Reply destination address using the conntrack module. Supports CIDR and `! ` negation. |
+| `ctorigsrcport` | `Optional[Pattern[...]]` | Original source port to match using the conntrack module. Supports ranges and `! ` negation. |
+| `ctorigdstport` | `Optional[Pattern[...]]` | Original destination port to match using the conntrack module. Supports ranges and `! ` negation. |
+| `ctreplsrcport` | `Optional[Pattern[...]]` | Reply source port to match using the conntrack module. Supports ranges and `! ` negation. |
+| `ctrepldstport` | `Optional[Pattern[...]]` | Reply destination port to match using the conntrack module. Supports ranges and `! ` negation. |
+
+  </Accordion>
+</AccordionGroup>
+
+<ParamField path="zone" type="Optional[Integer]">
+  Assign this packet to a zone ID and only have lookups done in that zone.
+</ParamField>
+
+<ParamField path="notrack" type="Optional[Boolean]">
+  Disable connection tracking for this packet. Requires iptables version >= 1.8.3.
+</ParamField>
+
+<ParamField path="helper" type="Optional[String[1]]">
+  Invoke the `nf_conntrack_xxx` helper module for this packet.
+</ParamField>
+
+---
+
+### Logging
+
+<ParamField path="log_level" type="Optional[Variant[Integer[0,7], String[1]]]">
+  When combined with `jump => 'LOG'`, specifies the system log level to log to.
+
+  <Note>Log level 4/warn is the default and is not returned by `iptables-save`. Explicitly setting `log_level` to this value can result in idempotency errors.</Note>
+</ParamField>
+
+<ParamField path="log_prefix" type="Optional[String[1]]">
+  When combined with `jump => 'LOG'`, specifies the log prefix to use when logging.
+</ParamField>
+
+<ParamField path="log_uid" type="Optional[Boolean]">
+  When combined with `jump => 'LOG'`, specifies the UID of the process making the connection.
+</ParamField>
+
+<ParamField path="log_tcp_sequence" type="Optional[Boolean]">
+  When combined with `jump => 'LOG'`, enables logging of the TCP sequence numbers.
+</ParamField>
+
+<ParamField path="log_tcp_options" type="Optional[Boolean]">
+  When combined with `jump => 'LOG'`, enables logging of the TCP packet header.
+</ParamField>
+
+<ParamField path="log_ip_options" type="Optional[Boolean]">
+  When combined with `jump => 'LOG'`, enables logging of the IP/IPv6 packet header.
+</ParamField>
+
+#### NFLOG parameters
+
+<ParamField path="nflog_group" type="Optional[Integer[1, 65535]]">
+  Used with `jump => 'NFLOG'`. The netlink group (0 – 65535) to which packets are sent (only applicable for `nfnetlink_log`). Defaults to 0.
+</ParamField>
+
+<ParamField path="nflog_prefix" type="Optional[String]">
+  Used with `jump => 'NFLOG'`. A prefix string to include in the log message, up to 64 characters long, useful for distinguishing messages in the logs.
+</ParamField>
+
+<ParamField path="nflog_size" type="Optional[Integer[1]]">
+  Used with `jump => 'NFLOG'`. The number of bytes to be copied to userspace (only applicable for `nfnetlink_log`). Overrides instance-level size settings.
+</ParamField>
+
+<ParamField path="nflog_threshold" type="Optional[Integer[1]]">
+  Used with `jump => 'NFLOG'`. Number of packets to queue inside the kernel before sending them to userspace. Higher values reduce overhead per packet but increase delay. Defaults to 1.
+</ParamField>
+
+<ParamField path="nflog_range" type="Optional[Integer[1]]">
+  Used with `jump => 'NFLOG'`. Deprecated — use `nflog_size` instead.
+</ParamField>
+
+---
+
+### NAT
+
+<ParamField path="tosource" type="Optional[String[1]]">
+  When using `jump => 'SNAT'`, specifies the new source address. Accepts a single IP address or an inclusive range. Format: `[ipaddr[-ipaddr]][:port[-port]]`.
+</ParamField>
+
+<ParamField path="todest" type="Optional[String[1]]">
+  When using `jump => 'DNAT'`, specifies the new destination address. Accepts a single IP address or an inclusive range with optional port. Format: `[ipaddr[-ipaddr]][:port[-port[/baseport]]]`.
+</ParamField>
+
+<ParamField path="toports" type="Optional[Variant[Integer[0, 65535], Pattern[...]]]">
+  For `REDIRECT`/`MASQUERADE`, the port that replaces the destination/source port. Accepts a single port or an inclusive range.
+</ParamField>
+
+<ParamField path="to" type="Optional[String[1]]">
+  For `NETMAP`, replaces the destination IP.
+</ParamField>
+
+<ParamField path="random" type="Optional[Boolean]">
+  When using a jump value of `MASQUERADE`, `DNAT`, `REDIRECT`, or `SNAT`, enables randomized port mapping.
+</ParamField>
+
+<ParamField path="random_fully" type="Optional[Boolean]">
+  When using a jump value of `MASQUERADE`, `DNAT`, `REDIRECT`, or `SNAT`, enables fully randomized port mapping.
+</ParamField>
+
+<ParamField path="gateway" type="Optional[Pattern[...]]">
+  The TEE target clones a packet and redirects the clone to another machine on the local network segment. `gateway` is the target host's IP address.
+</ParamField>
+
+---
+
+### Rate limiting
+
+<ParamField path="limit" type="Optional[Pattern[...]]">
+  Rate limiting value for matched packets. Format: `rate/[second|minute|hour|day]`.
+
+  Examples: `'50/sec'`, `'40/min'`, `'30/hour'`, `'10/day'`.
+</ParamField>
+
+<ParamField path="burst" type="Optional[Integer[1]]">
+  Rate limiting burst value (per second) before limit checks apply.
+</ParamField>
+
+#### Hashlimit parameters
+
+<ParamField path="hashlimit_name" type="Optional[String[1]]">
+  The name for the `/proc/net/ipt_hashlimit/foo` entry. Required when setting any other hashlimit values (along with either `hashlimit_upto` or `hashlimit_above`).
+</ParamField>
+
+<ParamField path="hashlimit_upto" type="Optional[Pattern[...]]">
+  Match if the rate is below or equal to the specified amount. Required (with `hashlimit_name`) when setting any other hashlimit values. Allowed forms: `'40'`, `'40/sec'`, `'40/min'`, `'40/hour'`, `'40/day'`.
+</ParamField>
+
+<ParamField path="hashlimit_above" type="Optional[Pattern[...]]">
+  Match if the rate is above the specified amount. Required (with `hashlimit_name`) when setting any other hashlimit values. Allowed forms: `'40'`, `'40/sec'`, `'40/min'`, `'40/hour'`, `'40/day'`.
+</ParamField>
+
+<ParamField path="hashlimit_burst" type="Optional[Integer[1]]">
+  Maximum initial number of packets to match. Recharged by one every time the limit is not reached, up to this number. Defaults to 5. When byte-based rate matching is used, specifies the amount of bytes that can exceed the given rate.
+</ParamField>
+
+<ParamField path="hashlimit_mode" type="Optional[Pattern[...]]">
+  A comma-separated list of objects to take into consideration for hashlimit. If not specified, hashlimit acts like limit. Allowed values: `srcip`, `srcport`, `dstip`, `dstport`.
+</ParamField>
+
+<ParamField path="hashlimit_srcmask" type="Optional[Integer[0,32]]">
+  When `--hashlimit-mode srcip` is used, groups all source addresses according to the given prefix length. Prefix must be between 0 and 32 (inclusive).
+</ParamField>
+
+<ParamField path="hashlimit_dstmask" type="Optional[Integer[0,32]]">
+  When `--hashlimit-mode srcip` is used, groups all destination addresses according to the given prefix length. Prefix must be between 0 and 32 (inclusive).
+</ParamField>
+
+<ParamField path="hashlimit_htable_size" type="Optional[Integer]">
+  The number of buckets of the hash table.
+</ParamField>
+
+<ParamField path="hashlimit_htable_max" type="Optional[Integer]">
+  Maximum entries in the hash table.
+</ParamField>
+
+<ParamField path="hashlimit_htable_expire" type="Optional[Integer]">
+  After how many milliseconds hash entries expire.
+</ParamField>
+
+<ParamField path="hashlimit_htable_gcinterval" type="Optional[Integer]">
+  How many milliseconds between garbage collection intervals.
+</ParamField>
+
+---
+
+### Mark
+
+<ParamField path="match_mark" type="Optional[Pattern[...]]">
+  Match the Netfilter mark value associated with the packet. Accepts `mark/mask` or `mark` format. Converted to hex if not already. Can be negated with `! `.
+</ParamField>
+
+<ParamField path="set_mark" type="Optional[Pattern[...]]">
+  Set the Netfilter mark value associated with the packet. Accepts `mark/mask` or `mark` format. Converted to hex if not already.
+</ParamField>
+
+---
+
+### IPsec
+
+<ParamField path="ipsec_dir" type="Optional[Enum[in, out]]">
+  Sets the IPsec policy direction.
+</ParamField>
+
+<ParamField path="ipsec_policy" type="Optional[Enum[none, ipsec]]">
+  Sets the IPsec policy type. May take a combination of arguments for flags that can be passed to `--pol ipsec`, such as `--strict`, `--reqid 100`, `--next`, `--proto esp`, etc.
+</ParamField>
+
+---
+
+### Time matching
+
+<ParamField path="time_start" type="Optional[Pattern[...]]">
+  Only match during the given daytime. Possible time range is `00:00:00` to `23:59:59`. Leading zeroes are allowed and interpreted as base-10.
+</ParamField>
+
+<ParamField path="time_stop" type="Optional[Pattern[...]]">
+  Only match until the given daytime. Possible time range is `00:00:00` to `23:59:59`. Leading zeroes are allowed and interpreted as base-10.
+</ParamField>
+
+<ParamField path="date_start" type="Optional[Pattern[...]]">
+  Only match during a given date range. Must be in ISO 8601 `T` notation. Possible range: `1970-01-01T00:00:00` to `2038-01-19T04:17:07`.
+</ParamField>
+
+<ParamField path="date_stop" type="Optional[Pattern[...]]">
+  Only match until a given date. Must be in ISO 8601 `T` notation. Possible range: `1970-01-01T00:00:00` to `2038-01-19T04:17:07`.
+</ParamField>
+
+<ParamField path="month_days" type="Optional[Variant[Integer[0,31], Array[Integer[0,31]]]]">
+  Only match on the given days of the month (1–31). Days that don't exist in a given month won't match. Accepts a single value or array.
+</ParamField>
+
+<ParamField path="week_days" type="Optional[Variant[Enum, Array]]">
+  Only match on the given weekdays. Valid values: `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun`. Accepts a single value or array.
+</ParamField>
+
+<ParamField path="time_contiguous" type="Optional[Boolean]">
+  When `time_stop` is smaller than `time_start`, treat this as a single time period instead of distinct intervals.
+</ParamField>
+
+<ParamField path="kernel_timezone" type="Optional[Boolean]">
+  Use the kernel timezone instead of UTC to determine whether a packet meets the time regulations.
+</ParamField>
+
+---
+
+### TCP MSS
+
+<ParamField path="set_mss" type="Optional[Integer[1]]">
+  Sets the TCP MSS value for packets.
+</ParamField>
+
+<ParamField path="clamp_mss_to_pmtu" type="Optional[Boolean]">
+  Sets the clamp MSS to PMTU flag.
+</ParamField>
+
+---
+
+### NFQUEUE
+
+<ParamField path="queue_num" type="Optional[Integer[1]]">
+  Used with the `NFQUEUE` jump target. The queue number to send packets to.
+</ParamField>
+
+<ParamField path="queue_bypass" type="Optional[Boolean]">
+  Allow packets to bypass `queue_num` if the userspace process is not listening.
+</ParamField>
+
+---
+
+### Statistics
+
+<ParamField path="stat_mode" type="Optional[Enum[nth, random]]">
+  Set the matching mode for statistic matching.
+</ParamField>
+
+<ParamField path="stat_every" type="Optional[Integer[1]]">
+  Match one packet every nth packet. Requires `stat_mode => 'nth'`.
+</ParamField>
+
+<ParamField path="stat_packet" type="Optional[Integer]">
+  Set the initial counter value for the nth mode. Must be between 0 and the value of `stat_every`. Defaults to 0. Requires `stat_mode => 'nth'`.
+</ParamField>
+
+<ParamField path="stat_probability" type="Optional[Variant[Integer[0,1], Float[0.0,1.0]]]">
+  Set the probability from 0 to 1 for a packet to be randomly matched. Only works with `stat_mode => 'random'`.
+</ParamField>
+
+---
+
+### Recent module
+
+<ParamField path="recent" type="Optional[Enum[set, update, rcheck, remove, ...]]">
+  Enable the recent module. Takes one of `set`, `update`, `rcheck`, or `remove` as an argument. Can be negated with `! `.
+
+  ```puppet
+  # Drop traffic from badguys seen in the last 60 seconds
+  firewall { '100 Drop badguy traffic':
+    recent   => 'update',
+    rseconds => 60,
+    rsource  => true,
+    rname    => 'badguy',
+    jump     => 'DROP',
+    chain    => 'FORWARD',
+  }
+  ```
+</ParamField>
+
+<ParamField path="rname" type="Optional[String[1]]">
+  Recent module — the name of the list. Defaults to `DEFAULT` when `recent` is set.
+</ParamField>
+
+<ParamField path="rsource" type="Optional[Boolean]">
+  Recent module — add the source IP address to the list. Mutually exclusive with `rdest`. Defaults to `true` when `recent` is set.
+</ParamField>
+
+<ParamField path="rdest" type="Optional[Boolean]">
+  Recent module — add the destination IP address to the list. Mutually exclusive with `rsource`. Must be boolean `true`.
+</ParamField>
+
+<ParamField path="rseconds" type="Optional[Integer[1]]">
+  Recent module — narrows the match to only happen when the address is in the list and was seen within the last given number of seconds. Used with `recent => 'rcheck'` or `recent => 'update'`.
+</ParamField>
+
+<ParamField path="rhitcount" type="Optional[Integer[1]]">
+  Recent module — narrows the match to only happen when the address is in the list and packets have been received greater than or equal to the given value. Used with `recent => 'update'` or `recent => 'rcheck'`.
+</ParamField>
+
+<ParamField path="rttl" type="Optional[Boolean]">
+  Recent module — narrows the match to only happen when the address is in the list and the TTL of the current packet matches the packet which hit `recent => 'set'`. Must be boolean `true`.
+</ParamField>
+
+<ParamField path="reap" type="Optional[Boolean]">
+  Recent module — can only be used with `rseconds`. When used, causes entries older than `rseconds` to be purged. Must be boolean `true`.
+</ParamField>
+
+<ParamField path="mask" type="Optional[Pattern[...]]">
+  Recent module — sets the mask to use when `recent` is enabled. Defaults to `255.255.255.255` when `recent` is set.
+</ParamField>
+
+---
+
+### DSCP / QoS
+
+<ParamField path="set_dscp" type="Optional[String[1]]">
+  Set DSCP markings.
+</ParamField>
+
+<ParamField path="set_dscp_class" type="Optional[Enum[...]]">
+  Set the DSCP field according to a predefined DiffServ class. Valid values: `af11`, `af12`, `af13`, `af21`, `af22`, `af23`, `af31`, `af32`, `af33`, `af41`, `af42`, `af43`, `cs1`, `cs2`, `cs3`, `cs4`, `cs5`, `cs6`, `cs7`, `ef`.
+</ParamField>
+
+---
+
+### REJECT
+
+<ParamField path="reject" type="Optional[Enum[...]]">
+  When combined with `jump => 'REJECT'`, specifies a different ICMP response to be sent back to the packet sender. Valid values differ by protocol:
+
+  - **IPv4:** `icmp-net-unreachable`, `icmp-host-unreachable`, `icmp-port-unreachable`, `icmp-proto-unreachable`, `icmp-net-prohibited`, `icmp-host-prohibited`, `icmp-admin-prohibited`, `tcp-reset`
+  - **IPv6:** `icmp6-no-route`, `no-route`, `icmp6-adm-prohibited`, `adm-prohibited`, `icmp6-addr-unreachable`, `addr-unreach`, `icmp6-port-unreachable`, `tcp-reset`
+</ParamField>
+
+---
+
+### Hop limiting (IPv6)
+
+<ParamField path="hop_limit" type="Optional[Variant[Pattern, Integer]]">
+  Hop limiting value for matched packets. IPv6 specific. Negate with `! ` at the beginning of the value.
+</ParamField>
+
+---
+
+### ClusterIP
+
+<Note>All ClusterIP parameters are IPv4 specific and require `jump => 'CLUSTERIP'`.</Note>
+
+<AccordionGroup>
+  <Accordion title="ClusterIP parameters">
+
+| Parameter | Type | Description |
+|---|---|---|
+| `clusterip_new` | `Optional[Boolean]` | Create a new ClusterIP. Must be set on the first rule for a given ClusterIP. |
+| `clusterip_hashmode` | `Optional[Enum[...]]` | Specify the hashing mode. Values: `sourceip`, `sourceip-sourceport`, `sourceip-sourceport-destport`. |
+| `clusterip_clustermac` | `Optional[Pattern[...]]` | Specify the ClusterIP MAC address. Must be a link-layer multicast address. |
+| `clusterip_total_nodes` | `Optional[Integer[1]]` | Number of total nodes within this cluster. |
+| `clusterip_local_node` | `Optional[Integer[1]]` | Specify the local node number. |
+| `clusterip_hash_init` | `Optional[String[1]]` | Specify the random seed used for hash initialization. |
+
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### Other
+
+<ParamField path="checksum_fill" type="Optional[Boolean]">
+  Compute and fill missing packet checksums.
+</ParamField>
+
+<ParamField path="line" type="Optional[String[1]]">
+  A read-only attribute containing the full rule, used when deleting rules and when applying `firewallchain` purge attributes.
+</ParamField>

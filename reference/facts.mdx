@@ -1,0 +1,139 @@
+---
+title: "Custom Facts"
+description: "Custom Facter facts provided by the Puppet Firewall module for detecting iptables versions on managed nodes."
+---
+
+## Overview
+
+The Puppet Firewall module ships three custom Facter facts that expose version information about iptables-related software on the managed node. You can use these facts in conditional Puppet code to make decisions based on the installed iptables version, or to verify that the expected tooling is present before applying rules.
+
+All three facts are resolved at catalog compilation time and are available as top-scope variables (e.g., `$facts['iptables_version']`) in your manifests.
+
+## Facts
+
+### `iptables_version`
+
+Returns the version string of the `iptables` binary installed on the node.
+
+**Availability:** Linux nodes only, and only when the `iptables` binary is present in `PATH`.
+
+**How it works:** The fact runs `iptables --version` and extracts the first `major.minor.patch` version string from the output using a regex match (`\d+\.\d+\.\d+`). If `iptables` is not found in `PATH` or the command fails, the fact returns `nil` and is absent from the fact set.
+
+**Return value:** A string such as `"1.8.7"`, or absent if iptables is not installed.
+
+---
+
+### `ip6tables_version`
+
+Returns the version string of the `ip6tables` binary installed on the node.
+
+**Availability:** Linux nodes only, and only when the `ip6tables` binary is present in `PATH`.
+
+**How it works:** The fact runs `ip6tables --version` and extracts the first `major.minor.patch` version string from the output. If `ip6tables` is not found in `PATH` or the command fails, the fact returns `nil` and is absent from the fact set.
+
+**Return value:** A string such as `"1.8.7"`, or absent if ip6tables is not installed.
+
+<Note>
+On some platforms (for example, nftables-based RedHat 8+ installations), `ip6tables` may be provided by the `iptables-nft` compatibility layer rather than a standalone binary. The fact reports the version of whatever binary resolves as `ip6tables` in `PATH`.
+</Note>
+
+---
+
+### `iptables_persistent_version`
+
+Returns the installed version of the `netfilter-persistent` package on Debian and Ubuntu systems.
+
+**Availability:** Debian and Ubuntu nodes only (the fact is confined to `os.name` values of `Debian` or `Ubuntu`).
+
+**How it works:** The fact runs `dpkg-query -Wf '${Version}' netfilter-persistent` and returns the result if it matches a `major.minor` version pattern. STDERR is suppressed to avoid noise from `dpkg` versions ≥ 1.16.7 when the package is not installed. If the package is absent or the output does not look like a version number, the fact returns `nil` and is absent from the fact set.
+
+**Return value:** A string such as `"1.0.4"`, or absent if `netfilter-persistent` is not installed.
+
+<Tip>
+The `netfilter-persistent` package replaced `iptables-persistent` as the underlying mechanism in Debian 8+ and Ubuntu 14.10+. Even when you install the `iptables-persistent` package on these newer releases, it installs `netfilter-persistent` as a dependency — which is what this fact queries.
+</Tip>
+
+## Using facts in Puppet manifests
+
+### Conditional logic based on iptables version
+
+You can gate behaviour on the installed iptables version using the `versioncmp` function from the `puppetlabs/stdlib` module:
+
+```puppet
+if $facts['iptables_version'] and versioncmp($facts['iptables_version'], '1.6.0') >= 0 {
+  # Use features available in iptables 1.6.0+
+  firewall { '100 log with nflog':
+    chain      => 'INPUT',
+    proto      => all,
+    jump       => 'NFLOG',
+    nflog_group => 1,
+  }
+}
+```
+
+### Checking whether iptables is present before applying rules
+
+```puppet
+if $facts['iptables_version'] {
+  class { 'firewall': }
+} else {
+  notify { 'iptables not found — skipping firewall management': }
+}
+```
+
+### Checking the persistent version on Debian/Ubuntu
+
+```puppet
+if $facts['iptables_persistent_version'] {
+  notify { "netfilter-persistent version: ${facts['iptables_persistent_version']}": }
+}
+```
+
+### Using ip6tables_version to guard IPv6 rules
+
+```puppet
+if $facts['ip6tables_version'] {
+  class { 'firewall':
+    ensure_v6 => running,
+  }
+
+  firewall { '010 accept loopback ipv6':
+    chain    => 'INPUT',
+    proto    => 'all',
+    iniface  => 'lo',
+    jump     => 'accept',
+    protocol => 'IPv6',
+  }
+}
+```
+
+## Viewing fact values
+
+You can inspect the values of these facts directly on any managed node.
+
+**Using the `facter` CLI:**
+
+```bash
+facter iptables_version
+facter ip6tables_version
+facter iptables_persistent_version
+```
+
+**Using the `puppet facts` command** (includes all facts, including custom ones):
+
+```bash
+puppet facts
+```
+
+You can filter to a specific fact:
+
+```bash
+puppet facts | grep iptables_version
+```
+
+**In a Puppet manifest** (for debugging during development):
+
+```puppet
+notify { "iptables version: ${facts['iptables_version']}": }
+notify { "ip6tables version: ${facts['ip6tables_version']}": }
+```

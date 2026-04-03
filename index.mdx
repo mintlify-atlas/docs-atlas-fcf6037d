@@ -1,97 +1,85 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Puppet Firewall Module"
+description: "Manage iptables and ip6tables firewall rules declaratively with Puppet. Define, enforce, and persist firewall configurations across your Linux infrastructure."
 ---
 
-## Setting up
+The Puppet Firewall module lets you manage firewall rules as Puppet resources. Instead of writing iptables commands by hand, you declare what your firewall should look like — Puppet ensures it stays that way across every node, every run.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install the module and write your first firewall rules in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Rule Ordering & Defaults" icon="list-ol" href="/guides/default-rules">
+    Set up pre and post rule classes to safely manage your firewall.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="firewall Resource Reference" icon="shield" href="/reference/firewall-type">
+    Full reference for all firewall resource parameters and features.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="firewallchain Reference" icon="link" href="/reference/firewallchain-type">
+    Manage custom chains, policies, and purge unmanaged rules.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What the module does
 
-Everything you need to create world-class documentation.
+The module introduces two Puppet resource types:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+- **`firewall`** — Manages individual iptables/ip6tables rules. Each rule is numbered for ordering and maps directly to an iptables rule on the system.
+- **`firewallchain`** — Manages chains and their default policies. Use this to create custom chains or set the default policy on built-in ones like `INPUT` and `FORWARD`.
 
-## Need inspiration?
+Rules take effect immediately when Puppet applies the catalog and persist across reboots automatically.
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Get started
+
+<Steps>
+  <Step title="Install the module">
+    Install from the Puppet Forge using the `puppet module` tool:
+    ```bash
+    puppet module install puppetlabs-firewall
+    ```
+  </Step>
+  <Step title="Create pre and post rule classes">
+    Define `my_fw::pre` and `my_fw::post` classes to establish safe baseline rules before and after your custom rules run.
+  </Step>
+  <Step title="Declare your firewall rules">
+    Use the `firewall` resource to declare rules in the Puppet DSL. Rules are applied in numeric order based on their title prefix.
+  </Step>
+  <Step title="Include the firewall class">
+    Add `class { 'firewall': }` to your node to ensure required packages are installed and services are running.
+  </Step>
+</Steps>
+
+## Supported platforms
+
+The module supports these operating systems:
+
+| Platform | Versions |
+|---|---|
+| RedHat / CentOS | 7, 8, 9 |
+| Debian | 10, 11, 12 |
+| Ubuntu | 18.04, 20.04, 22.04, 24.04 |
+| SLES | 12, 15 |
+| Rocky Linux | 8 |
+| AlmaLinux | 8 |
+| OracleLinux | 7 |
+
+<Note>
+Requires Puppet 8.x and the `puppetlabs/stdlib` module (>= 9.0.0).
+</Note>
+
+## Explore the docs
+
+<CardGroup cols={2}>
+  <Card title="IPv6 rules" icon="globe" href="/guides/ipv6">
+    Write ip6tables rules using the protocol parameter.
+  </Card>
+  <Card title="NAT and advanced rules" icon="arrows-left-right" href="/guides/nat-and-advanced">
+    SNAT, DNAT, MASQUERADE, TCPMSS, and custom chains.
+  </Card>
+  <Card title="Purging unmanaged rules" icon="trash" href="/guides/purging-rules">
+    Enforce that only Puppet-managed rules exist on a node.
+  </Card>
+  <Card title="Limitations" icon="triangle-exclamation" href="/limitations">
+    Known issues, platform-specific restrictions, and workarounds.
+  </Card>
+</CardGroup>

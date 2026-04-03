@@ -1,0 +1,180 @@
+---
+title: "firewallchain Resource Type"
+description: "Reference for the firewallchain Puppet resource type, which manages iptables rule chains and their default policies."
+---
+
+## Overview
+
+The `firewallchain` resource type manages rule chains for firewalls. It currently supports iptables, ip6tables, and ebtables on Linux, and provides support for:
+
+- Creating and deleting user-defined chains
+- Setting the default policy on built-in chains
+- Purging unmanaged firewall rules from a chain
+
+## Providers
+
+The `iptables_chain` provider is the only provider that supports `firewallchain`.
+
+## Supported features
+
+| Feature | Description |
+|---|---|
+| `iptables_chain` | The provider provides iptables chain features. |
+| `policy` | Default policy (inbuilt chains only). |
+
+## Name format
+
+The `name` parameter follows the format `{chain}:{table}:{protocol}`. All three components are required.
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4': ... }
+firewallchain { 'MY_CUSTOM_CHAIN:filter:IPv4': ... }
+firewallchain { 'POSTROUTING:nat:IPv6': ... }
+```
+
+**Data type:** `Pattern[/^(?:\S+):(?:nat|mangle|filter|raw|rawpost|broute|security):(?:IP(?:v[46])?|ethernet)$/]`
+
+### Supported tables
+
+| Table | Description |
+|---|---|
+| `nat` | Network Address Translation rules |
+| `mangle` | Packet alteration rules |
+| `filter` | Default table for standard packet filtering |
+| `raw` | Rules processed before connection tracking |
+| `rawpost` | Rules processed after connection tracking |
+| `broute` | Bridging/routing decisions (ebtables) |
+| `security` | Mandatory access control rules |
+
+### Supported protocols
+
+| Protocol | Description |
+|---|---|
+| `IPv4` | IPv4 (iptables) |
+| `IPv6` | IPv6 (ip6tables) |
+| `IP` | Shorthand alias accepted by the pattern |
+| `ethernet` | Ethernet bridging (ebtables) |
+
+## Examples
+
+### Create a custom chain
+
+```puppet
+firewallchain { 'MY_CHAIN:filter:IPv4':
+  ensure => present,
+}
+```
+
+Then reference it from a `firewall` rule:
+
+```puppet
+firewall { '100 jump to custom chain':
+  chain => 'INPUT',
+  jump  => 'MY_CHAIN',
+  proto => 'tcp',
+}
+```
+
+### Set the default INPUT policy to drop
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  policy => 'drop',
+}
+```
+
+### Purge unmanaged rules with exceptions
+
+Use `purge` with `ignore` to remove rules not managed by Puppet while preserving rules added by external tools like fail2ban:
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  purge  => true,
+  ignore => [
+    '-j fail2ban-ssh',
+    '--comment "[^"]*(?i:ignore)[^"]*"',
+  ],
+}
+```
+
+### Purge unmanaged rules, ignoring foreign rules
+
+Use `ignore_foreign` to skip rules that do not match the Puppet title pattern (a leading number):
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  purge          => true,
+  ignore_foreign => true,
+}
+```
+
+---
+
+## Parameters
+
+### `name`
+
+**Namevar.** **Type:** `Pattern[/^(?:\S+):(?:nat|mangle|filter|raw|rawpost|broute|security):(?:IP(?:v[46])?|ethernet)$/]`
+
+The canonical name of the chain in `{chain}:{table}:{protocol}` format. All three components are required and must be separated by colons. For example:
+
+```puppet
+firewallchain { 'FORWARD:filter:IPv4': ... }
+firewallchain { 'PREROUTING:nat:IPv6': ... }
+firewallchain { 'BROUTING:broute:ethernet': ... }
+```
+
+---
+
+## Properties
+
+<ParamField path="ensure" type="Enum[present, absent]" default="present">
+  Whether this chain should be present or absent on the target system.
+
+  Setting this to `absent` will first remove all rules associated with the chain and then delete the chain itself.
+
+  <Note>For built-in chains (`INPUT`, `FORWARD`, `OUTPUT`, `PREROUTING`, `POSTROUTING`), setting `ensure => absent` will only remove rules added to the chain and, if the policy was changed, return it to the default — it will not delete the chain itself.</Note>
+</ParamField>
+
+<ParamField path="policy" type="Optional[Enum[accept, drop, queue, return]]">
+  The action to take when the end of the chain is reached. Can only be set on built-in chains (`INPUT`, `FORWARD`, `OUTPUT`, `PREROUTING`, `POSTROUTING`).
+
+  | Value | Description |
+  |---|---|
+  | `accept` | The packet is accepted |
+  | `drop` | The packet is dropped |
+  | `queue` | The packet is passed to userspace |
+  | `return` | The packet is returned to the calling (jump) chain or the default of inbuilt chains |
+
+  <Warning>Setting `policy => 'drop'` on `INPUT` will drop all unmatched inbound traffic. Ensure you have rules in place to allow necessary traffic (such as established connections and SSH) before applying a drop policy.</Warning>
+</ParamField>
+
+<ParamField path="purge" type="Boolean">
+  Whether to purge unmanaged rules in this chain. When set to `true`, any firewall rules in this chain that are not managed by a `firewall` Puppet resource will be removed on each Puppet run.
+
+  Use `ignore` or `ignore_foreign` to exempt specific rules from purging.
+</ParamField>
+
+<ParamField path="ignore" type="Optional[Variant[String[1], Array[String[1]]]]">
+  A regex (or array of regexes) to match against firewall rules in order to exempt unmanaged rules from purging. Matched against the output of `iptables-save`.
+
+  To support flags, use the Ruby inline flag mechanism. For example, the regex `/foo/i` can be written as `'(?i)foo'` or `'(?i:foo)'`.
+
+  Accepts a single string or an array:
+
+  ```puppet
+  firewallchain { 'INPUT:filter:IPv4':
+    purge  => true,
+    ignore => [
+      '-j fail2ban-ssh',
+      '--comment "[^"]*(?i:ignore)[^"]*"',
+    ],
+  }
+  ```
+</ParamField>
+
+<ParamField path="ignore_foreign" type="Boolean">
+  When set to `true`, ignores rules that do not match the Puppet title pattern `^\d+[[:graph:][:space:]]` when purging unmanaged rules in this chain. This allows you to ignore firewall rules that were not added by Puppet.
+
+  <Warning>Nothing prevents other systems from configuring rules with comments that start with digits, making them indistinguishable from Puppet-managed rules when using this option.</Warning>
+</ParamField>

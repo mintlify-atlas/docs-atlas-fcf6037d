@@ -1,0 +1,106 @@
+---
+title: "Introduction"
+description: "Manage firewall rules across your infrastructure with the Puppet Firewall module."
+keywords: ['puppet', 'firewall', 'iptables', 'ip6tables', 'firewallchain']
+---
+
+The Puppet Firewall module lets you manage firewall rules with Puppet. It introduces the `firewall` resource type for managing and configuring firewall rules from within the Puppet DSL, with support for iptables and ip6tables. The module also provides the `firewallchain` resource, which lets you manage chains and firewall lists, including ebtables for bridging support.
+
+The module acts on your running firewall, making immediate changes as the catalog executes. By defining default `pre` and `post` rules, you can establish global defaults for your hosts and avoid locking yourself out during a Puppet run.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install the module and configure your first firewall rules in minutes.
+  </Card>
+  <Card title="Upgrading" icon="arrow-up-circle" href="/upgrading">
+    Migrate from older versions, including the breaking changes in v7.0.0.
+  </Card>
+</CardGroup>
+
+## What firewall affects
+
+When you use the Firewall module, it manages the following on every node:
+
+- Every node running a firewall
+- Firewall settings in your system
+- Connection settings for managed nodes
+- Unmanaged resources (these get purged if you enable purging)
+
+<Warning>
+  The module will dynamically apply rules in the order they appear in the catalog. A deny rule could be applied before allow rules if you do not define `pre` and `post` classes. This can interrupt connections to your Puppet server. See the [Quick Start](/quickstart) guide for how to set this up safely.
+</Warning>
+
+## Setup requirements
+
+The Firewall module uses Ruby-based providers. You must enable [pluginsync](http://docs.puppetlabs.com/guides/plugins_in_modules.html#enabling-pluginsync) for the providers to be synced to your agents before they run.
+
+**Module dependency:** `puppetlabs/stdlib` `>= 9.0.0 < 10.0.0`
+
+**Puppet version requirement:** `>= 8.0.0 < 9.0.0`
+
+## Resource types
+
+The module provides two resource types.
+
+### `firewall`
+
+The `firewall` resource manages individual firewall rules. Rules use a numbering system in the resource title to control ordering — lower numbers run first. For example, `'000 accept all icmp'` runs before `'999 drop all'`.
+
+```puppet
+firewall { '100 allow http and https access':
+  dport  => [80, 443],
+  proto  => 'tcp',
+  jump   => 'accept',
+}
+```
+
+<Note>
+  The ordering range 9000–9999 is reserved for unmanaged rules. Do not define firewall rules in this range.
+</Note>
+
+Rule titles are stored in iptables using the comment feature. Values must match the pattern `/^\d+[[:graph:][:space:]]+$/`.
+
+### `firewallchain`
+
+The `firewallchain` resource manages iptables chains. The resource namevar uses the format `chain_name:table:protocol`.
+
+```puppet
+firewallchain { 'MY_CHAIN:filter:IPv4':
+  ensure => present,
+}
+```
+
+You can also use `firewallchain` to set a default policy on a built-in chain instead of adding a drop-all rule:
+
+```puppet
+firewallchain { 'INPUT:filter:IPv4':
+  ensure => present,
+  policy => drop,
+  before => undef,
+}
+```
+
+<Note>
+  At this time, only iptables and ip6tables chains are supported. Internal chains cannot be deleted, only flushed.
+</Note>
+
+## Supported operating systems
+
+The module is tested and supported on the following operating systems.
+
+| Operating system | Supported releases     |
+|------------------|------------------------|
+| RedHat           | 7, 8, 9                |
+| CentOS           | 7, 8                   |
+| OracleLinux      | 7                      |
+| Scientific       | 7                      |
+| SLES             | 12, 15                 |
+| Debian           | 10, 11, 12             |
+| Ubuntu           | 18.04, 20.04, 22.04, 24.04 |
+| Rocky            | 8                      |
+| AlmaLinux        | 8                      |
+
+### Known limitations by platform
+
+- **SLES:** The `socket` parameter is not supported. Using it will cause catalog failures.
+- **Oracle Enterprise Linux (Unbreakable kernel):** The `socket` and `owner` parameters are unsupported. These may work with the stock RedHat kernel instead. Declaring either parameter on an unsupported system results in iptables rules failing to apply.

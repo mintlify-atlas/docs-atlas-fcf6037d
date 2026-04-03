@@ -1,0 +1,112 @@
+---
+title: 'Limitations'
+description: 'Supported operating systems, known parameter restrictions, and behavioral limitations of the Puppet Firewall module.'
+keywords: ['firewall', 'limitations', 'supported os', 'iptables', 'ip6tables', 'ebtables', 'sles', 'oracle linux']
+---
+
+## Supported operating systems
+
+The following operating systems and releases are supported by this module (version 8.3.0):
+
+| Operating system | Supported releases |
+|---|---|
+| RedHat | 7, 8, 9 |
+| CentOS | 7, 8 |
+| OracleLinux | 7 |
+| Scientific | 7 |
+| SLES | 12, 15 |
+| Debian | 10, 11, 12 |
+| Ubuntu | 18.04, 20.04, 22.04, 24.04 |
+| Rocky | 8 |
+| AlmaLinux | 8 |
+
+This module requires Puppet 8.x (`>= 8.0.0 < 9.0.0`) and `puppetlabs/stdlib` `>= 9.0.0 < 10.0.0`.
+
+## Parameter restrictions
+
+### SLES
+
+<Warning>
+The `socket` parameter is not supported on SLES. Using it will cause the catalog to fail with iptables errors, rather than issuing a warning that the feature is unusable.
+</Warning>
+
+Do not declare the `socket` parameter in any firewall rules applied to SLES nodes.
+
+### Oracle Enterprise Linux
+
+<Warning>
+The `socket` and `owner` parameters are unsupported on Oracle Enterprise Linux when using the "Unbreakable" kernel. Declaring either parameter on an unsupported system will result in iptables rules failing to apply.
+</Warning>
+
+These parameters may work correctly when using the stock RedHat kernel instead of the "Unbreakable" kernel.
+
+### `condition` parameter requires `xtables-addons`
+
+The `condition` parameter requires `xtables-addons` to be installed on the target system before the rule can take effect.
+
+On Ubuntu, install the required package with:
+
+```bash
+apt-get install xtables-addons-common
+```
+
+Or manage the package with Puppet:
+
+```puppet
+package { 'xtables-addons-common':
+  ensure => 'latest',
+}
+```
+
+For other distributions (RedHat, Debian, CentOS, etc.), you must manually install the `xtables-addons` package using the appropriate package manager for your distribution.
+
+## Rule title format
+
+In iptables, the rule title is stored using the comment feature of the underlying firewall subsystem. Rule titles must match the following pattern:
+
+```
+/^\d+[[:graph:][:space:]]+$/
+```
+
+This means every rule title must begin with one or more digits followed by printable or space characters. For example:
+
+```puppet
+firewall { '100 allow http and https access':
+  dport  => [80, 443],
+  proto  => 'tcp',
+  jump   => 'accept',
+}
+```
+
+The ordering range **9000–9999 is reserved for unmanaged rules**. Do not specify any firewall rules in this range.
+
+## Persistence known issues
+
+### ip6tables on older Debian and Ubuntu
+
+Rules are persisted automatically between reboots, but there are known issues with ip6tables persistence on older Debian and Ubuntu distributions. If you are using ip6tables on an older release, verify that rules survive a reboot after applying your configuration.
+
+### ebtables
+
+There are known issues with ebtables persistence. The `firewallchain` type supports ebtables for bridging, but only iptables and ip6tables chains are fully supported for rule management. Treat ebtables persistence as unsupported and validate behavior in your environment before relying on it.
+
+## `ignore_foreign` and resource purge interaction
+
+<Note>
+The `ignore_foreign` parameter on `firewallchain` does not work as expected when used together with a `resources` purge of `firewall`.
+</Note>
+
+When you use both `ignore_foreign => true` on a `firewallchain` resource and `resources { 'firewall': purge => true }`, the interaction between the two does not behave as intended. If you need fine-grained control over which unmanaged rules are removed, use the `purge` and `ignore` parameters on `firewallchain`, or the `ignore` regex, rather than relying on `ignore_foreign` to protect rules from the global firewall purge.
+
+## Duplicate rule behavior
+
+It is possible for an unmanaged rule to exist on the target system with the same comment as a rule specified in your Puppet manifest. This configuration is not supported.
+
+When the module detects a duplicate rule, it throws an error and halts its update. You must either:
+
+- Remove the duplicate unmanaged rule from the system, or
+- Update your Puppet manifest so the rule title is unique
+
+<Note>
+The `onduplicaterulebehaviour` parameter that previously allowed configuring this behavior has been removed. A simple error is now always thrown when a duplicate is detected, because the previous configurable behavior caused significant performance regressions.
+</Note>
